@@ -1,6 +1,15 @@
 const mongoose = require('mongoose');
 
+const messageSchema = new mongoose.Schema({
+    message: String,
+    senderUserName: String,
+    time: String,
+});
+
 const userSchema = new mongoose.Schema({
+    status: String,
+    lastSeen: String,
+    lastSeenMessage: String,
     email: {
         type: String,
         required: true,
@@ -14,8 +23,10 @@ const userSchema = new mongoose.Schema({
         unique: true,
         sparse: true,
     },
-    status: String,
-    lastSeen: String,
+    otherUsers: {
+        type: Map,
+        of: [messageSchema],
+    },
     createdAt: {
         type: Date,
         default: Date.now

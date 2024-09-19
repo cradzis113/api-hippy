@@ -1,6 +1,8 @@
 const { tempData, deleteTempUser } = require('../utils/userUtils');
 const { generateToken } = require('../utils/tokenUtils');
+const { formatLastSeenTime } = require('../utils/timeUtils');
 const User = require('../models/userModel');
+const moment = require('moment')
 
 const authController = async (req, res) => {
     const { email, code } = req.body;
@@ -22,6 +24,8 @@ const authController = async (req, res) => {
     try {
         const existingUser = await User.findOne({ email });
         if (existingUser) {
+            
+            deleteTempUser(email);
             const token = generateToken({ email });
 
             res.cookie('token', token, {
@@ -41,7 +45,11 @@ const authController = async (req, res) => {
             return res.status(201).json({ message: 'Login suscessful' });
         }
 
-        const newUser = new User({ email });
+        const currentDateTime = moment();
+        const formattedDateTimeString = currentDateTime.format('YYYY-MM-DD HH:mm');
+        const lastSeenMessage = formatLastSeenTime(formattedDateTimeString)
+
+        const newUser = new User({ email, lastSeen: formattedDateTimeString, lastSeenMessage: lastSeenMessage });
         await newUser.save();
 
         deleteTempUser(email);
