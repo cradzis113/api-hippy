@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const messageSchema = new mongoose.Schema({
     message: String,
     senderUserName: String,
+    recipientUserName: String,
     time: String,
 });
 
@@ -10,6 +11,7 @@ const userSchema = new mongoose.Schema({
     status: String,
     lastSeen: String,
     lastSeenMessage: String,
+    socketId: String,
     email: {
         type: String,
         required: true,
@@ -23,7 +25,7 @@ const userSchema = new mongoose.Schema({
         unique: true,
         sparse: true,
     },
-    otherUsers: {
+    messageHistory: {
         type: Map,
         of: [messageSchema],
     },
