@@ -3,7 +3,7 @@ const User = require('../models/userModel');
 const moment = require('moment');
 const { formatLastSeenTime } = require('../utils/timeUtils');
 
-const chatStates = {}
+let chatStates = {}
 
 const setupSocket = (server) => {
   const io = new Server(server, {
@@ -58,64 +58,66 @@ const setupSocket = (server) => {
 
     socket.on('sendMessage', async (messageData) => {
       const { recipientUserName, senderUserName } = messageData;
-    
+
       try {
         const sender = await User.findOne({ userName: senderUserName });
         const recipient = await User.findOne({ userName: recipientUserName });
-    
+
         if (!sender || !recipient) {
           return console.error('Sender or recipient not found');
         }
-    
+
         if (!sender.messageHistory) {
           sender.messageHistory = new Map();
         }
-    
+
         if (!recipient.messageHistory) {
           recipient.messageHistory = new Map();
         }
-    
+
         if (!sender.messageHistory.has(recipientUserName)) {
           sender.messageHistory.set(recipientUserName, []);
         }
-    
+
         if (!recipient.messageHistory.has(senderUserName)) {
           recipient.messageHistory.set(senderUserName, []);
         }
-    
+
         sender.messageHistory.get(recipientUserName).push(messageData);
         recipient.messageHistory.get(senderUserName).push(messageData);
-    
+
         await recipient.save();
         const updatedSender = await sender.save();
         const conversation = updatedSender.messageHistory.get(recipientUserName);
-    
-        Object.keys(chatStates).forEach(clientId => {
-          const clientState = chatStates[clientId];
-          if (clientState.recipientUserName === recipientUserName) {
-            socket.to(clientState.socketId).emit('messageSent', conversation);
+
+        if (chatStates[recipientUserName]) {
+          if (chatStates[recipientUserName].recipientUserName === senderUserName) {
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', conversation);
           }
-        });
-    
+        }
+
         socket.emit('messageSent', conversation);
       } catch (error) {
         console.error('Error updating user messages:', error);
       }
     });
-    
 
     socket.on('chatRequest', (messageData) => {
-      const { recipientUserName, socketId } = messageData;
+      const { recipientUserName, recipientSocketId, userName, socketId } = messageData;
+      if (!recipientUserName || !userName || !recipientSocketId || !socketId) return
 
-      if (!recipientUserName && !socketId) return
-      chatStates[socketId] = { recipientUserName, socketId }
+      if (chatStates[recipientUserName] && chatStates[recipientUserName].recipientUserName === userName) {
+        chatStates[recipientUserName].recipientSocketId = socketId
+      }
+
+      chatStates[userName] = { recipientUserName, recipientSocketId, socketId }
     });
 
     socket.on('connectionUpdate', async (connectionData) => {
       const { userName, socketId } = connectionData;
 
-      if (socketId && !chatStates[socketId]) {
-        chatStates[socketId] = {}
+      if (!chatStates[userName]) {
+        chatStates[userName] = {}
       }
 
       await User.findOneAndUpdate(
@@ -125,9 +127,9 @@ const setupSocket = (server) => {
     });
 
     socket.on('disconnect', () => {
-      if (chatStates[socket.id]) {
-        delete chatStates[socket.id]
-      }
+      chatStates = Object.fromEntries(
+        Object.entries(chatStates).filter(([key, value]) => value.socketId !== socket.id)
+      );
     });
 
   });
