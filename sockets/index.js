@@ -56,7 +56,7 @@ const setupSocket = (server) => {
       }
     });
 
-    socket.on('sendMessage', async (messageData) => {
+    socket.on('privateChat', async (messageData) => {
       const { recipientUserName, senderUserName } = messageData;
 
       try {
@@ -102,16 +102,34 @@ const setupSocket = (server) => {
       }
     });
 
-    socket.on('chatRequest', (messageData) => {
-      const { recipientUserName, recipientSocketId, userName, socketId } = messageData;
-      if (!recipientUserName || !userName || !recipientSocketId || !socketId) return
+    socket.on('sendMessage', (data) => {
+      const { recipientUserName, message, senderUserName } = data
+      socket.to(chatStates[recipientUserName].socketId).emit('cee', { message, senderUserName })
 
-      if (chatStates[recipientUserName] && chatStates[recipientUserName].recipientUserName === userName) {
-        chatStates[recipientUserName].recipientSocketId = socketId
+    })
+
+    socket.on('chatEvent', (data) => {
+      const { type, userName, socketId, recipientUserName, recipientSocketId } = data;
+  
+      // Check for required fields
+      if (!userName || !socketId) return;
+  
+      if (type === 'register') {
+          // Handle user registration
+          chatStates[userName] = { socketId };
+      } else if (type === 'chatRequest') {
+          // Handle chat request
+          if (!recipientUserName || !recipientSocketId) return;
+  
+          // Check if recipient is registered
+          if (chatStates[recipientUserName]) {
+              chatStates[recipientUserName].recipientSocketId = socketId;
+          }
+  
+          chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
       }
-
-      chatStates[userName] = { recipientUserName, recipientSocketId, socketId }
-    });
+  });
+  
 
     socket.on('connectionUpdate', async (connectionData) => {
       const { userName, socketId } = connectionData;
