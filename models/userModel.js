@@ -5,6 +5,7 @@ const messageSchema = new mongoose.Schema({
     senderUserName: String,
     recipientUserName: String,
     time: String,
+    seen: Boolean
 });
 
 const userSchema = new mongoose.Schema({

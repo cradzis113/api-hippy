@@ -1,7 +1,7 @@
 const { Server } = require('socket.io');
 const User = require('../models/userModel');
 const moment = require('moment');
-const { formatLastSeenTime } = require('../utils/timeUtils');
+const { formatLastSeenMessage } = require('../utils/timeUtils');
 
 let chatStates = {}
 
@@ -34,7 +34,7 @@ const setupSocket = (server) => {
         const formattedDateTimeString = currentDateTime.format('YYYY-MM-DD HH:mm');
 
         const lastSeen = hasFocus ? formattedDateTimeString : undefined;
-        const lastSeenMessage = hasFocus ? formatLastSeenTime(formattedDateTimeString) : undefined;
+        const lastSeenMessage = hasFocus ? formatLastSeenMessage(formattedDateTimeString) : undefined;
 
         const updateFields = {
           status: status,
@@ -57,7 +57,7 @@ const setupSocket = (server) => {
     });
 
     socket.on('privateChat', async (messageData) => {
-      const { recipientUserName, senderUserName } = messageData;
+      const { recipientUserName, senderUserName, message } = messageData;
 
       try {
         const sender = await User.findOne({ userName: senderUserName });
@@ -92,10 +92,37 @@ const setupSocket = (server) => {
 
         if (chatStates[recipientUserName]) {
           if (chatStates[recipientUserName].recipientUserName === senderUserName) {
+            await User.updateMany(
+              { userName: senderUserName, [`messageHistory.${recipientUserName}.seen`]: { $exists: true } },
+              { $unset: { [`messageHistory.${recipientUserName}.$[].seen`]: "" } }
+            );
+
+            await User.updateMany(
+              { userName: recipientUserName, [`messageHistory.${senderUserName}.seen`]: { $exists: true } },
+              { $unset: { [`messageHistory.${senderUserName}.$[].seen`]: "" } }
+            );
+
+            await User.updateMany(
+              { userName: senderUserName, [`messageHistory.${recipientUserName}.seen`]: { $exists: false } },
+              { $set: { [`messageHistory.${recipientUserName}.$[msg].seen`]: true } },
+              { arrayFilters: [{ "msg.message": message }] }
+            );
+
+            await User.updateMany(
+              { userName: recipientUserName, [`messageHistory.${senderUserName}.seen`]: { $exists: false } },
+              { $set: { [`messageHistory.${senderUserName}.$[msg].seen`]: true } },
+              { arrayFilters: [{ "msg.message": message }] }
+            );
+
             socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', conversation);
           }
         }
 
+        if (chatStates[recipientUserName]) {
+          socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', recipient.messageHistory);
+        }
+
+        socket.emit('messageHistoryUpdate', updatedSender.messageHistory);
         socket.emit('messageSent', conversation);
       } catch (error) {
         console.error('Error updating user messages:', error);
@@ -104,32 +131,48 @@ const setupSocket = (server) => {
 
     socket.on('sendMessage', (data) => {
       const { recipientUserName, message, senderUserName } = data
-      socket.to(chatStates[recipientUserName].socketId).emit('cee', { message, senderUserName })
 
+      socket.emit('notification', { message, recipientUserName })
+      if (chatStates[recipientUserName]) {
+        socket.to(chatStates[recipientUserName].socketId).emit('notification', { message, senderUserName });
+      }
     })
 
-    socket.on('chatEvent', (data) => {
-      const { type, userName, socketId, recipientUserName, recipientSocketId } = data;
-  
-      // Check for required fields
+    socket.on('chatEvent', async (eventData) => {
+      const { type, userName, socketId, recipientUserName, recipientSocketId } = eventData;
       if (!userName || !socketId) return;
-  
+    
       if (type === 'register') {
-          // Handle user registration
-          chatStates[userName] = { socketId };
+        chatStates[userName] = { socketId };
       } else if (type === 'chatRequest') {
-          // Handle chat request
-          if (!recipientUserName || !recipientSocketId) return;
-  
-          // Check if recipient is registered
+        if (!recipientUserName || !recipientSocketId) return;
+    
+        try {
+          const sender = await User.findOne({ userName });
+          const messageHistory = sender.messageHistory.get(recipientUserName);
+    
+          messageHistory.forEach((message, index) => {
+            if (index === messageHistory.length - 1) {
+              message.seen = true;
+            } else {
+              message.seen = undefined;
+            }
+          });
+    
+          await sender.save();
+          socket.emit('readMessages', sender);
+    
           if (chatStates[recipientUserName]) {
-              chatStates[recipientUserName].recipientSocketId = socketId;
+            chatStates[recipientUserName].recipientSocketId = socketId;
           }
-  
-          chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
+        } catch (error) {
+          console.error(error);
+        }
+    
+        chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
       }
-  });
-  
+    });
+    
 
     socket.on('connectionUpdate', async (connectionData) => {
       const { userName, socketId } = connectionData;
