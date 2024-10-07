@@ -58,77 +58,78 @@ const setupSocket = (server) => {
 
     socket.on('privateChat', async (messageData) => {
       const { recipientUserName, senderUserName, message } = messageData;
-
+    
       try {
-        const sender = await User.findOne({ userName: senderUserName });
-        const recipient = await User.findOne({ userName: recipientUserName });
-
-        if (!sender || !recipient) {
+        const senderUser = await User.findOne({ userName: senderUserName });
+        const recipientUser = await User.findOne({ userName: recipientUserName });
+    
+        if (!senderUser || !recipientUser) {
           return console.error('Sender or recipient not found');
         }
-
-        if (!sender.messageHistory) {
-          sender.messageHistory = new Map();
+    
+        if (!senderUser.messageHistory) {
+          senderUser.messageHistory = new Map();
         }
-
-        if (!recipient.messageHistory) {
-          recipient.messageHistory = new Map();
+    
+        if (!recipientUser.messageHistory) {
+          recipientUser.messageHistory = new Map();
         }
-
-        if (!sender.messageHistory.has(recipientUserName)) {
-          sender.messageHistory.set(recipientUserName, []);
+    
+        if (!senderUser.messageHistory.has(recipientUserName)) {
+          senderUser.messageHistory.set(recipientUserName, []);
         }
-
-        if (!recipient.messageHistory.has(senderUserName)) {
-          recipient.messageHistory.set(senderUserName, []);
+    
+        if (!recipientUser.messageHistory.has(senderUserName)) {
+          recipientUser.messageHistory.set(senderUserName, []);
         }
-
-        sender.messageHistory.get(recipientUserName).push(messageData);
-        recipient.messageHistory.get(senderUserName).push(messageData);
-
-        await recipient.save();
-        const updatedSender = await sender.save();
-        const conversation = updatedSender.messageHistory.get(recipientUserName);
-
+    
+        senderUser.messageHistory.get(recipientUserName).push(messageData);
+        recipientUser.messageHistory.get(senderUserName).push(messageData);
+    
+        const updatedRecipientUser = await recipientUser.save();
+        const updatedSenderUser = await senderUser.save();
+        const senderConversationHistory = updatedSenderUser.messageHistory.get(recipientUserName);
+    
         if (chatStates[recipientUserName]) {
           if (chatStates[recipientUserName].recipientUserName === senderUserName) {
-            await User.updateMany(
-              { userName: senderUserName, [`messageHistory.${recipientUserName}.seen`]: { $exists: true } },
-              { $unset: { [`messageHistory.${recipientUserName}.$[].seen`]: "" } }
-            );
-
-            await User.updateMany(
-              { userName: recipientUserName, [`messageHistory.${senderUserName}.seen`]: { $exists: true } },
-              { $unset: { [`messageHistory.${senderUserName}.$[].seen`]: "" } }
-            );
-
-            await User.updateMany(
-              { userName: senderUserName, [`messageHistory.${recipientUserName}.seen`]: { $exists: false } },
-              { $set: { [`messageHistory.${recipientUserName}.$[msg].seen`]: true } },
-              { arrayFilters: [{ "msg.message": message }] }
-            );
-
-            await User.updateMany(
-              { userName: recipientUserName, [`messageHistory.${senderUserName}.seen`]: { $exists: false } },
-              { $set: { [`messageHistory.${senderUserName}.$[msg].seen`]: true } },
-              { arrayFilters: [{ "msg.message": message }] }
-            );
-
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', conversation);
+            updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
+              if (msgIndex === updatedSenderUser.messageHistory.get(recipientUserName).length - 1) {
+                msg.seen = true;
+              } else {
+                msg.seen = undefined;
+              }
+            });
+    
+            updatedRecipientUser.messageHistory.get(senderUserName).forEach((msg, msgIndex) => {
+              if (msgIndex === updatedRecipientUser.messageHistory.get(senderUserName).length - 1) {
+                msg.seen = true;
+              } else {
+                msg.seen = undefined;
+              }
+            });
+    
+            const recipientWithSeenMessages = await updatedRecipientUser.save();
+            const senderWithSeenMessages = await updatedSenderUser.save();
+    
+            socket.emit('readMessages', senderWithSeenMessages);
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', recipientWithSeenMessages);
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', senderConversationHistory);
           }
         }
-
+    
         if (chatStates[recipientUserName]) {
-          socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', recipient.messageHistory);
+          const refreshedRecipient = await User.findOne({ userName: recipientUserName });
+          socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', refreshedRecipient.messageHistory);
         }
-
-        socket.emit('messageHistoryUpdate', updatedSender.messageHistory);
-        socket.emit('messageSent', conversation);
+    
+        const refreshedSender = await User.findOne({ userName: senderUserName });
+        socket.emit('messageHistoryUpdate', refreshedSender.messageHistory);
+        socket.emit('messageSent', senderConversationHistory);
       } catch (error) {
         console.error('Error updating user messages:', error);
       }
     });
-
+    
     socket.on('sendMessage', (data) => {
       const { recipientUserName, message, senderUserName } = data
 
@@ -148,31 +149,54 @@ const setupSocket = (server) => {
         if (!recipientUserName || !recipientSocketId) return;
     
         try {
-          const sender = await User.findOne({ userName });
-          const messageHistory = sender.messageHistory.get(recipientUserName);
+          const senderUser = await User.findOne({ userName });
+          const recipientUser = await User.findOne({ userName: recipientUserName });
     
-          messageHistory.forEach((message, index) => {
-            if (index === messageHistory.length - 1) {
-              message.seen = true;
-            } else {
+          const senderMessageHistory = senderUser?.messageHistory?.get(recipientUserName);
+          const recipientMessageHistory = recipientUser?.messageHistory?.get(userName);
+    
+          if (!senderMessageHistory || !recipientMessageHistory) {
+            if (chatStates[recipientUserName]) {
+              chatStates[recipientUserName].recipientSocketId = socketId;
+            }
+            chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
+            return;
+          }
+    
+          senderMessageHistory.forEach((message, messageIndex) => {
+            if (messageIndex !== senderMessageHistory.length - 1) {
               message.seen = undefined;
+            }
+    
+            if (message.senderUserName !== userName) {
+              if (messageIndex === senderMessageHistory.length - 1) {
+                message.seen = true;
+              }
+    
+              recipientMessageHistory.forEach((recipientMessage, recipientMessageIndex) => {
+                if (recipientMessageIndex === recipientMessageHistory.length - 1) {
+                  recipientMessage.seen = true;
+                } else {
+                  recipientMessage.seen = undefined;
+                }
+              });
             }
           });
     
-          await sender.save();
-          socket.emit('readMessages', sender);
+          await senderUser.save();
+          await recipientUser.save();
+          socket.emit('readMessages', senderUser);
+          socket.to(recipientSocketId).emit('readMessages', recipientUser);
     
           if (chatStates[recipientUserName]) {
             chatStates[recipientUserName].recipientSocketId = socketId;
           }
+          chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
         } catch (error) {
           console.error(error);
         }
-    
-        chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
       }
     });
-    
 
     socket.on('connectionUpdate', async (connectionData) => {
       const { userName, socketId } = connectionData;

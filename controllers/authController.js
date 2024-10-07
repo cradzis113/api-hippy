@@ -1,6 +1,6 @@
 const { tempData, deleteTempUser } = require('../utils/userUtils');
 const { generateToken } = require('../utils/tokenUtils');
-const { formatLastSeenTime } = require('../utils/timeUtils');
+const { formatLastSeenMessage } = require('../utils/timeUtils');
 const User = require('../models/userModel');
 const moment = require('moment')
 
@@ -47,7 +47,7 @@ const authController = async (req, res) => {
 
         const currentDateTime = moment();
         const formattedDateTimeString = currentDateTime.format('YYYY-MM-DD HH:mm');
-        const lastSeenMessage = formatLastSeenTime(formattedDateTimeString)
+        const lastSeenMessage = formatLastSeenMessage(formattedDateTimeString)
 
         const newUser = new User({ email, lastSeen: formattedDateTimeString, lastSeenMessage: lastSeenMessage });
         await newUser.save();
