@@ -58,38 +58,38 @@ const setupSocket = (server) => {
 
     socket.on('privateChat', async (messageData) => {
       const { recipientUserName, senderUserName, message } = messageData;
-    
+
       try {
         const senderUser = await User.findOne({ userName: senderUserName });
         const recipientUser = await User.findOne({ userName: recipientUserName });
-    
+
         if (!senderUser || !recipientUser) {
           return console.error('Sender or recipient not found');
         }
-    
+
         if (!senderUser.messageHistory) {
           senderUser.messageHistory = new Map();
         }
-    
+
         if (!recipientUser.messageHistory) {
           recipientUser.messageHistory = new Map();
         }
-    
+
         if (!senderUser.messageHistory.has(recipientUserName)) {
           senderUser.messageHistory.set(recipientUserName, []);
         }
-    
+
         if (!recipientUser.messageHistory.has(senderUserName)) {
           recipientUser.messageHistory.set(senderUserName, []);
         }
-    
+
         senderUser.messageHistory.get(recipientUserName).push(messageData);
         recipientUser.messageHistory.get(senderUserName).push(messageData);
-    
+
         const updatedRecipientUser = await recipientUser.save();
         const updatedSenderUser = await senderUser.save();
         const senderConversationHistory = updatedSenderUser.messageHistory.get(recipientUserName);
-    
+
         if (chatStates[recipientUserName]) {
           if (chatStates[recipientUserName].recipientUserName === senderUserName) {
             updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
@@ -99,7 +99,7 @@ const setupSocket = (server) => {
                 msg.seen = undefined;
               }
             });
-    
+
             updatedRecipientUser.messageHistory.get(senderUserName).forEach((msg, msgIndex) => {
               if (msgIndex === updatedRecipientUser.messageHistory.get(senderUserName).length - 1) {
                 msg.seen = true;
@@ -107,21 +107,22 @@ const setupSocket = (server) => {
                 msg.seen = undefined;
               }
             });
-    
+
             const recipientWithSeenMessages = await updatedRecipientUser.save();
             const senderWithSeenMessages = await updatedSenderUser.save();
-    
+
             socket.emit('readMessages', senderWithSeenMessages);
             socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', recipientWithSeenMessages);
             socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', senderConversationHistory);
           }
         }
-    
+
         if (chatStates[recipientUserName]) {
           const refreshedRecipient = await User.findOne({ userName: recipientUserName });
           socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', refreshedRecipient.messageHistory);
+          socket.to(chatStates[recipientUserName].socketId).emit('messageBackState', updatedRecipientUser.messageHistory)
         }
-    
+
         const refreshedSender = await User.findOne({ userName: senderUserName });
         socket.emit('messageHistoryUpdate', refreshedSender.messageHistory);
         socket.emit('messageSent', senderConversationHistory);
@@ -129,7 +130,7 @@ const setupSocket = (server) => {
         console.error('Error updating user messages:', error);
       }
     });
-    
+
     socket.on('sendMessage', (data) => {
       const { recipientUserName, message, senderUserName } = data
 
@@ -142,19 +143,19 @@ const setupSocket = (server) => {
     socket.on('chatEvent', async (eventData) => {
       const { type, userName, socketId, recipientUserName, recipientSocketId } = eventData;
       if (!userName || !socketId) return;
-    
+
       if (type === 'register') {
         chatStates[userName] = { socketId };
       } else if (type === 'chatRequest') {
         if (!recipientUserName || !recipientSocketId) return;
-    
+
         try {
           const senderUser = await User.findOne({ userName });
           const recipientUser = await User.findOne({ userName: recipientUserName });
-    
+
           const senderMessageHistory = senderUser?.messageHistory?.get(recipientUserName);
           const recipientMessageHistory = recipientUser?.messageHistory?.get(userName);
-    
+
           if (!senderMessageHistory || !recipientMessageHistory) {
             if (chatStates[recipientUserName]) {
               chatStates[recipientUserName].recipientSocketId = socketId;
@@ -162,17 +163,17 @@ const setupSocket = (server) => {
             chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
             return;
           }
-    
+
           senderMessageHistory.forEach((message, messageIndex) => {
             if (messageIndex !== senderMessageHistory.length - 1) {
               message.seen = undefined;
             }
-    
+
             if (message.senderUserName !== userName) {
               if (messageIndex === senderMessageHistory.length - 1) {
                 message.seen = true;
               }
-    
+
               recipientMessageHistory.forEach((recipientMessage, recipientMessageIndex) => {
                 if (recipientMessageIndex === recipientMessageHistory.length - 1) {
                   recipientMessage.seen = true;
@@ -182,12 +183,12 @@ const setupSocket = (server) => {
               });
             }
           });
-    
+
           await senderUser.save();
           await recipientUser.save();
           socket.emit('readMessages', senderUser);
           socket.to(recipientSocketId).emit('readMessages', recipientUser);
-    
+
           if (chatStates[recipientUserName]) {
             chatStates[recipientUserName].recipientSocketId = socketId;
           }
