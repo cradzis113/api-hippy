@@ -1,11 +1,12 @@
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
+    time: String,
+    seen: Boolean,
     message: String,
+    replyInfo: Object,
     senderUserName: String,
     recipientUserName: String,
-    time: String,
-    seen: Boolean
 });
 
 const userSchema = new mongoose.Schema({

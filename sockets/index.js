@@ -57,7 +57,7 @@ const setupSocket = (server) => {
     });
 
     socket.on('privateChat', async (messageData) => {
-      const { recipientUserName, senderUserName, message } = messageData;
+      const { recipientUserName, senderUserName } = messageData;
 
       try {
         const senderUser = await User.findOne({ userName: senderUserName });
