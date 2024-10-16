@@ -49,7 +49,7 @@ const setupSocket = (server) => {
         );
 
         const userStatusUpdate = (({ status, userName, lastSeenMessage }) => ({ status, userName, lastSeenMessage }))(updatedUser);
-        io.emit('userStatusUpdated', userStatusUpdate);
+        socket.emit('userStatusUpdated', userStatusUpdate);
 
       } catch (error) {
         console.error('Error updating user status:', error);
@@ -196,6 +196,69 @@ const setupSocket = (server) => {
         } catch (error) {
           console.error(error);
         }
+      }
+    });
+
+    socket.on('deleteMessage', async (data) => {
+      const { id, senderUserName, recipientUserName, currentUser } = data;
+
+      try {
+        const senderUser = await User.findOne({ userName: senderUserName });
+        const recipientUser = await User.findOne({ userName: recipientUserName });
+
+        if (currentUser === recipientUserName) {
+          const currentUserDoc = await User.findOne({ userName: currentUser });
+          currentUserDoc.messageHistory.get(senderUserName).forEach(message => {
+            if (message.id === id) {
+              if (!message.revoked) {
+                message['revoked'] = { revokedFromYou: currentUser };
+              } else {
+                message.revoked['revokedFromYou'] = currentUser;
+              }
+            }
+          });
+          await currentUserDoc.save();
+          return;
+        }
+
+        const senderMessageHistory = senderUser.messageHistory.get(recipientUserName);
+        const recipientMessageHistory = recipientUser.messageHistory.get(senderUserName);
+
+        if (senderMessageHistory && recipientMessageHistory) {
+          const recipientMessage = recipientMessageHistory.find(message => message.id === id);
+          const senderMessage = senderMessageHistory.find(message => message.id === id);
+
+          if (senderMessage && recipientMessage) {
+            if (senderMessage.revoked) {
+              senderMessage.revoked['revokedBoth'] = senderUserName;
+            } else {
+              senderMessage.revoked = { revokedBoth: senderUserName };
+            }
+
+            if (recipientMessage.revoked) {
+              recipientMessage.revoked['revokedBoth'] = senderUserName;
+            } else {
+              recipientMessage.revoked = { revokedBoth: senderUserName };
+            }
+
+            senderUser.markModified('messageHistory');
+            recipientUser.markModified('messageHistory');
+
+            senderUser.messageHistory.set(recipientUserName, senderMessageHistory);
+            recipientUser.messageHistory.set(senderUserName, recipientMessageHistory);
+
+            await senderUser.save();
+            await recipientUser.save();
+
+            const updatedSenderMessageHistory = senderUser.messageHistory.get(recipientUserName);
+            const updatedRecipientMessageHistory = recipientUser.messageHistory.get(senderUserName);
+
+            socket.emit('messageSent', updatedSenderMessageHistory);
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedRecipientMessageHistory);
+          }
+        }
+      } catch (error) {
+        console.error('Error occurred while deleting the message:', error);
       }
     });
 
