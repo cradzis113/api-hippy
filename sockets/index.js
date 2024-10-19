@@ -200,24 +200,86 @@ const setupSocket = (server) => {
     });
 
     socket.on('deleteMessage', async (data) => {
-      const { id, senderUserName, recipientUserName, currentUser } = data;
+      const { id, senderUserName, recipientUserName, currentUser, revoked } = data;
 
       try {
         const senderUser = await User.findOne({ userName: senderUserName });
         const recipientUser = await User.findOne({ userName: recipientUserName });
 
+        if (revoked && revoked.revokedBoth && !revoked.revokedBy) {
+          senderUser.messageHistory.get(recipientUserName).forEach(message => {
+            if (message.id === id) {
+              message.revoked.revokedBy = [currentUser]
+            }
+          });
+
+          recipientUser.messageHistory.get(senderUserName).forEach(message => {
+            if (message.id === id) {
+              message.revoked.revokedBy = [currentUser]
+            }
+          });
+
+          senderUser.markModified('messageHistory');
+          recipientUser.markModified('messageHistory');
+
+          await recipientUser.save();
+          const updatedSender = await senderUser.save();
+
+          const updatedMessageHistory = updatedSender.messageHistory.get(recipientUserName);
+          socket.emit('messageSent', updatedMessageHistory)
+          return
+        }
+
+        if (revoked && revoked.revokedBoth && revoked.revokedBy) {
+          senderUser.messageHistory.get(recipientUserName).forEach(message => {
+            if (message.id === id) {
+              message.revoked.revokedBy.push(currentUser)
+            }
+          });
+
+          recipientUser.messageHistory.get(senderUserName).forEach(message => {
+            if (message.id === id) {
+              message.revoked.revokedBy.push(currentUser)
+            }
+          });
+
+          senderUser.markModified('messageHistory');
+          recipientUser.markModified('messageHistory');
+
+          await recipientUser.save();
+          const updatedSender = await senderUser.save();
+
+          const updatedMessageHistory = updatedSender.messageHistory.get(recipientUserName);
+          socket.emit('messageSent', updatedMessageHistory)
+          return
+        }
+
         if (currentUser === recipientUserName) {
-          const currentUserDoc = await User.findOne({ userName: currentUser });
-          currentUserDoc.messageHistory.get(senderUserName).forEach(message => {
+          senderUser.messageHistory.get(recipientUserName).forEach(message => {
             if (message.id === id) {
               if (!message.revoked) {
-                message['revoked'] = { revokedFromYou: currentUser };
+                message['revoked'] = { revokedBy: [currentUser] };
               } else {
-                message.revoked['revokedFromYou'] = currentUser;
+                message.revoked['revokedBy'] = [currentUser];
               }
             }
           });
-          await currentUserDoc.save();
+
+          recipientUser.messageHistory.get(senderUserName).forEach(message => {
+            if (message.id === id) {
+              if (!message.revoked) {
+                message['revoked'] = { revokedBy: [currentUser] };
+              } else {
+                message.revoked['revoked'] = [currentUser];
+              }
+            }
+          });
+
+          await recipientUser.save();
+          const updatedSender = await senderUser.save();
+
+          const updatedMessageHistory = updatedSender.messageHistory.get(recipientUserName);
+          socket.emit('messageSent', updatedMessageHistory);
           return;
         }
 
@@ -251,10 +313,8 @@ const setupSocket = (server) => {
             await recipientUser.save();
 
             const updatedSenderMessageHistory = senderUser.messageHistory.get(recipientUserName);
-            const updatedRecipientMessageHistory = recipientUser.messageHistory.get(senderUserName);
-
             socket.emit('messageSent', updatedSenderMessageHistory);
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedRecipientMessageHistory);
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
           }
         }
       } catch (error) {
