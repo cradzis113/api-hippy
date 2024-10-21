@@ -200,86 +200,74 @@ const setupSocket = (server) => {
     });
 
     socket.on('deleteMessage', async (data) => {
-      const { id, senderUserName, recipientUserName, currentUser, revoked } = data;
+      const { id, senderUserName, recipientUserName, currentUser, revoked, visibilityOption } = data;
 
       try {
-        const senderUser = await User.findOne({ userName: senderUserName });
-        const recipientUser = await User.findOne({ userName: recipientUserName });
+        const [senderUser, recipientUser] = await Promise.all([
+          User.findOne({ userName: senderUserName }),
+          User.findOne({ userName: recipientUserName }),
+        ]);
 
-        if (revoked && revoked.revokedBoth && !revoked.revokedBy) {
-          senderUser.messageHistory.get(recipientUserName).forEach(message => {
+        const updateMessageRevokedStatus = (messages, visibilityOption) => {
+          messages.forEach((message) => {
             if (message.id === id) {
-              message.revoked.revokedBy = [currentUser]
+              if (!message.revoked) {
+                message.revoked = { revokedBy: [currentUser] };
+              } else {
+                message.revoked.revokedBy = message.revoked.revokedBy || [];
+                message.revoked.revokedBy.push(currentUser);
+              }
             }
           });
+        };
 
-          recipientUser.messageHistory.get(senderUserName).forEach(message => {
-            if (message.id === id) {
-              message.revoked.revokedBy = [currentUser]
-            }
-          });
-
+        const saveAndEmitUpdates = async () => {
           senderUser.markModified('messageHistory');
           recipientUser.markModified('messageHistory');
 
-          await recipientUser.save();
-          const updatedSender = await senderUser.save();
+          await Promise.all([senderUser.save(), recipientUser.save()]);
 
-          const updatedMessageHistory = updatedSender.messageHistory.get(recipientUserName);
-          socket.emit('messageSent', updatedMessageHistory)
-          return
+          const updatedSenderMessageHistory = senderUser.messageHistory.get(recipientUserName);
+          const updatedRecipientMessageHistory = recipientUser.messageHistory.get(senderUserName);
+
+          if (visibilityOption === 'onlyYou') {
+            const secondToLastSenderMessage = updatedSenderMessageHistory.find((message, index) => updatedRecipientMessageHistory.length - 2 === index);
+            console.log(secondToLastSenderMessage)
+            socket.emit('notification', { message: secondToLastSenderMessage.message, recipientUserName });
+          } else {
+            socket.emit('notification', { message: 'Bạn đã thu hồi một tin nhắn', recipientUserName });
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: `${senderUserName} đã thu hồi một tin nhắn`, senderUserName });
+          }
+
+          socket.emit('messageSent', updatedSenderMessageHistory);
+          socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
+        };
+
+        if (currentUser === senderUserName && !revoked && visibilityOption === 'onlyYou') {
+          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+          await saveAndEmitUpdates();
+          return;
+        }
+
+        if (revoked && revoked.revokedBoth && !revoked.revokedBy) {
+          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+          await saveAndEmitUpdates();
+          return;
         }
 
         if (revoked && revoked.revokedBoth && revoked.revokedBy) {
-          senderUser.messageHistory.get(recipientUserName).forEach(message => {
-            if (message.id === id) {
-              message.revoked.revokedBy.push(currentUser)
-            }
-          });
-
-          recipientUser.messageHistory.get(senderUserName).forEach(message => {
-            if (message.id === id) {
-              message.revoked.revokedBy.push(currentUser)
-            }
-          });
-
-          senderUser.markModified('messageHistory');
-          recipientUser.markModified('messageHistory');
-
-          await recipientUser.save();
-          const updatedSender = await senderUser.save();
-
-          const updatedMessageHistory = updatedSender.messageHistory.get(recipientUserName);
-          socket.emit('messageSent', updatedMessageHistory)
-          return
+          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+          await saveAndEmitUpdates();
+          return;
         }
 
-        if (currentUser === recipientUserName) {
-          senderUser.messageHistory.get(recipientUserName).forEach(message => {
-            if (message.id === id) {
-              if (!message.revoked) {
-                message['revoked'] = { revokedBy: [currentUser] };
-              } else {
-                message.revoked['revokedBy'] = [currentUser];
-              }
-            }
-          });
-
-          recipientUser.messageHistory.get(senderUserName).forEach(message => {
-            if (message.id === id) {
-              if (!message.revoked) {
-                message['revoked'] = { revokedBy: [currentUser] };
-              } else {
-                message.revoked['revoked'] = [currentUser];
-              }
-            }
-          });
-
-          await recipientUser.save();
-          const updatedSender = await senderUser.save();
-
-          const updatedMessageHistory = updatedSender.messageHistory.get(recipientUserName);
-          socket.emit('messageSent', updatedMessageHistory);
+        if (currentUser === recipientUserName && visibilityOption === 'onlyYou') {
+          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+          await saveAndEmitUpdates();
           return;
         }
 
@@ -287,34 +275,22 @@ const setupSocket = (server) => {
         const recipientMessageHistory = recipientUser.messageHistory.get(senderUserName);
 
         if (senderMessageHistory && recipientMessageHistory) {
-          const recipientMessage = recipientMessageHistory.find(message => message.id === id);
-          const senderMessage = senderMessageHistory.find(message => message.id === id);
+          const senderMessage = senderMessageHistory.find((msg) => msg.id === id);
+          const recipientMessage = recipientMessageHistory.find((msg) => msg.id === id);
 
           if (senderMessage && recipientMessage) {
-            if (senderMessage.revoked) {
-              senderMessage.revoked['revokedBoth'] = senderUserName;
-            } else {
-              senderMessage.revoked = { revokedBoth: senderUserName };
-            }
+            const setRevokedBoth = (message) => {
+              if (!message.revoked) {
+                message.revoked = { revokedBoth: senderUserName };
+              } else {
+                message.revoked.revokedBoth = senderUserName;
+              }
+            };
 
-            if (recipientMessage.revoked) {
-              recipientMessage.revoked['revokedBoth'] = senderUserName;
-            } else {
-              recipientMessage.revoked = { revokedBoth: senderUserName };
-            }
+            setRevokedBoth(senderMessage);
+            setRevokedBoth(recipientMessage);
 
-            senderUser.markModified('messageHistory');
-            recipientUser.markModified('messageHistory');
-
-            senderUser.messageHistory.set(recipientUserName, senderMessageHistory);
-            recipientUser.messageHistory.set(senderUserName, recipientMessageHistory);
-
-            await senderUser.save();
-            await recipientUser.save();
-
-            const updatedSenderMessageHistory = senderUser.messageHistory.get(recipientUserName);
-            socket.emit('messageSent', updatedSenderMessageHistory);
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
+            await saveAndEmitUpdates();
           }
         }
       } catch (error) {
