@@ -208,7 +208,8 @@ const setupSocket = (server) => {
           User.findOne({ userName: recipientUserName }),
         ]);
 
-        const updateMessageRevokedStatus = (messages, visibilityOption) => {
+        const updateMessageRevokedStatus = (messages) => {
+
           messages.forEach((message) => {
             if (message.id === id) {
               if (!message.revoked) {
@@ -232,7 +233,6 @@ const setupSocket = (server) => {
 
           if (visibilityOption === 'onlyYou') {
             const secondToLastSenderMessage = updatedSenderMessageHistory.find((message, index) => updatedRecipientMessageHistory.length - 2 === index);
-            console.log(secondToLastSenderMessage)
             socket.emit('notification', { message: secondToLastSenderMessage.message, recipientUserName });
           } else {
             socket.emit('notification', { message: 'Bạn đã thu hồi một tin nhắn', recipientUserName });
@@ -240,41 +240,46 @@ const setupSocket = (server) => {
           }
 
           socket.emit('messageSent', updatedSenderMessageHistory);
-          socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
+          if (chatStates[senderUserName].recipientSocketId) {
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
+          }
         };
 
-        if (currentUser === senderUserName && !revoked && visibilityOption === 'onlyYou') {
-          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
-          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
-          await saveAndEmitUpdates();
-          return;
-        }
+        if (visibilityOption === 'onlyYou') {
+          if (currentUser === senderUserName) {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+            await saveAndEmitUpdates();
+            return;
+          }
 
-        if (revoked && revoked.revokedBoth && !revoked.revokedBy) {
-          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
-          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
-          await saveAndEmitUpdates();
-          return;
-        }
+          if (revoked && revoked.revokedBoth && !revoked.revokedBy) {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+            await saveAndEmitUpdates();
+            return;
+          }
 
-        if (revoked && revoked.revokedBoth && revoked.revokedBy) {
-          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
-          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
-          await saveAndEmitUpdates();
-          return;
-        }
+          if (revoked && revoked.revokedBoth && revoked.revokedBy) {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+            await saveAndEmitUpdates();
+            return;
+          }
 
-        if (currentUser === recipientUserName && visibilityOption === 'onlyYou') {
-          updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
-          updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
-          await saveAndEmitUpdates();
-          return;
+          if (currentUser === recipientUserName) {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName), recipientUserName);
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName), senderUserName);
+            await saveAndEmitUpdates();
+            return;
+          }
+
         }
 
         const senderMessageHistory = senderUser.messageHistory.get(recipientUserName);
         const recipientMessageHistory = recipientUser.messageHistory.get(senderUserName);
 
-        if (senderMessageHistory && recipientMessageHistory) {
+        if (senderMessageHistory && recipientMessageHistory && visibilityOption === 'everyone') {
           const senderMessage = senderMessageHistory.find((msg) => msg.id === id);
           const recipientMessage = recipientMessageHistory.find((msg) => msg.id === id);
 
