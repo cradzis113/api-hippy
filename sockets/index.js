@@ -222,6 +222,70 @@ const setupSocket = (server) => {
           });
         };
 
+        const processUserMessages = (chatMessageHistory, userName, currentUserName) => {
+          const userMessages = chatMessageHistory[userName];
+          let lastMessage = userMessages[userMessages.length - 1];
+
+          const firstNonRevokedByOtherUser = userMessages.find(
+            message => !message?.revoked?.revokedBoth && !message.revoked?.revokedBy?.includes(userName)
+          );
+
+          const messagesRevokedByCurrentUser = userMessages.filter(
+            message => message?.revoked?.revokedBy?.includes(currentUserName)
+          );
+
+          const nonRevokedMessages = userMessages.filter(
+            msg => !msg?.revoked?.revokedBoth && !msg?.revoked?.revokedBy?.includes(currentUserName)
+          );
+
+          const revokedMessagesByBoth = userMessages.filter(
+            msg => msg?.revoked?.revokedBoth && !msg?.revoked?.revokedBy?.includes(currentUserName)
+          );
+
+          const firstMessageRevokedByBoth = revokedMessagesByBoth.find(msg => msg?.revoked?.revokedBoth);
+          const latestMessageRevokedByBoth = revokedMessagesByBoth.reverse().find(msg => msg?.revoked?.revokedBoth);
+          const latestRevokedIndex = userMessages.findIndex(msg => msg?.id === latestMessageRevokedByBoth?.id);
+          const latestNonRevokedIndex = userMessages.findIndex(
+            msg => msg?.id === nonRevokedMessages[nonRevokedMessages.length - 1]?.id
+          );
+
+          if (firstNonRevokedByOtherUser) {
+            if (latestNonRevokedIndex > latestRevokedIndex) {
+              lastMessage = userMessages[latestNonRevokedIndex];
+            } else if (latestRevokedIndex !== -1 && !userMessages[latestRevokedIndex]?.revoked?.revokedBy?.includes(currentUserName)) {
+              lastMessage = {
+                message: `${userMessages[latestRevokedIndex].senderUserName === currentUserName ? 'Bạn' : userName} đã thu hồi một tin nhắn`
+              };
+            } else if (messagesRevokedByCurrentUser.length === userMessages.length) {
+              lastMessage = { message: 'History was cleared' };
+            }
+          } else {
+            if (lastMessage?.revoked?.revokedBoth && !lastMessage?.revoked?.revokedBy?.includes(currentUserName)) {
+              lastMessage = {
+                message: `${lastMessage.senderUserName === currentUserName ? 'Bạn' : userName} đã thu hồi một tin nhắn`
+              };
+            } else if (messagesRevokedByCurrentUser.length === userMessages.length) {
+              lastMessage = { message: 'History was cleared' };
+            } else if (nonRevokedMessages.length === 1 && !firstMessageRevokedByBoth) {
+              lastMessage = nonRevokedMessages[0];
+            } else if (nonRevokedMessages.length > 1 && !latestMessageRevokedByBoth) {
+              lastMessage = nonRevokedMessages[nonRevokedMessages.length - 1];
+            } else if (firstMessageRevokedByBoth && nonRevokedMessages.length === 0) {
+              lastMessage = {
+                message: `${firstMessageRevokedByBoth.senderUserName === currentUserName ? 'Bạn' : senderUserName} đã thu hồi một tin nhắn`
+              };
+            } else if (latestNonRevokedIndex > latestRevokedIndex) {
+              lastMessage = userMessages[latestNonRevokedIndex];
+            } else if (latestNonRevokedIndex < latestRevokedIndex) {
+              lastMessage = {
+                message: `${firstMessageRevokedByBoth.senderUserName === currentUserName ? 'Bạn' : userName} đã thu hồi một tin nhắn`
+              };
+            }
+          }
+
+          return lastMessage
+        };
+
         const saveAndEmitUpdates = async () => {
           senderUser.markModified('messageHistory');
           recipientUser.markModified('messageHistory');
@@ -229,14 +293,14 @@ const setupSocket = (server) => {
           await Promise.all([senderUser.save(), recipientUser.save()]);
 
           const updatedSenderMessageHistory = senderUser.messageHistory.get(recipientUserName);
-          const updatedRecipientMessageHistory = recipientUser.messageHistory.get(senderUserName);
+          const lastMessageFromSender = processUserMessages(Object.fromEntries(senderUser.messageHistory), recipientUserName, currentUser);
+          const lastMessageFromRecipient = processUserMessages(Object.fromEntries(recipientUser.messageHistory), senderUserName, recipientUserName);
 
           if (visibilityOption === 'onlyYou') {
-            const secondToLastSenderMessage = updatedSenderMessageHistory.find((message, index) => updatedRecipientMessageHistory.length - 2 === index);
-            socket.emit('notification', { message: secondToLastSenderMessage.message, recipientUserName });
+            socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName, senderUserName });
           } else {
-            socket.emit('notification', { message: 'Bạn đã thu hồi một tin nhắn', recipientUserName });
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: `${senderUserName} đã thu hồi một tin nhắn`, senderUserName });
+            socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName });
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: lastMessageFromRecipient.message, senderUserName });
           }
 
           socket.emit('messageSent', updatedSenderMessageHistory);
@@ -273,7 +337,6 @@ const setupSocket = (server) => {
             await saveAndEmitUpdates();
             return;
           }
-
         }
 
         const senderMessageHistory = senderUser.messageHistory.get(recipientUserName);
@@ -294,7 +357,6 @@ const setupSocket = (server) => {
 
             setRevokedBoth(senderMessage);
             setRevokedBoth(recipientMessage);
-
             await saveAndEmitUpdates();
           }
         }
@@ -314,6 +376,15 @@ const setupSocket = (server) => {
         { userName: userName },
         { $set: { socketId: socketId } },
       );
+    });
+
+    socket.on('getUserData', async (userName) => {
+      try {
+        const userData = await User.findOne({ userName });
+        socket.emit('receiveUserData', userData);
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+      }
     });
 
     socket.on('disconnect', () => {
