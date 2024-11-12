@@ -299,8 +299,8 @@ const setupSocket = (server) => {
           if (visibilityOption === 'onlyYou') {
             socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName, senderUserName });
           } else {
-            socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName });
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: lastMessageFromRecipient.message, senderUserName });
+            socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName, senderUserName });
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: lastMessageFromRecipient.message, senderUserName});
           }
 
           socket.emit('messageSent', updatedSenderMessageHistory);
