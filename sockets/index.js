@@ -30,6 +30,10 @@ const setupSocket = (server) => {
     socket.on('updateUserStatus', async (data) => {
       try {
         const { userName, status, hasFocus } = data;
+
+        const user = await User.findOne({ userName });
+        if (!user) return;
+        
         const currentDateTime = moment();
         const formattedDateTimeString = currentDateTime.format('YYYY-MM-DD HH:mm');
 
@@ -300,7 +304,7 @@ const setupSocket = (server) => {
             socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName, senderUserName });
           } else {
             socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName, senderUserName });
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: lastMessageFromRecipient.message, senderUserName});
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: lastMessageFromRecipient.message, senderUserName });
           }
 
           socket.emit('messageSent', updatedSenderMessageHistory);

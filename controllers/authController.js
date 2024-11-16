@@ -2,17 +2,34 @@ const { tempData, deleteTempUser } = require('../utils/userUtils');
 const { generateToken } = require('../utils/tokenUtils');
 const { formatLastSeenMessage } = require('../utils/timeUtils');
 const User = require('../models/userModel');
-const moment = require('moment')
+const moment = require('moment');
+
+const setAuthCookies = (res, token) => {
+    const cookieOptions = {
+        httpOnly: true,
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+    };
+
+    res.cookie('token', token, cookieOptions);
+    res.cookie('userStatus', 'loggedIn', {
+        ...cookieOptions,
+        httpOnly: false, 
+    }); 
+};
 
 const authController = async (req, res) => {
     const { email, code } = req.body;
 
-    if (!tempData[email]) {
-        return res.status(400).json({ message: 'code has expired' });
+    const userTempData = tempData[email];
+    if (!userTempData) {
+        return res.status(400).json({ message: 'Code has expired' });
     }
 
-    const userTempData = tempData[email];
     if (userTempData.try <= 0) {
+        deleteTempUser(email);
         return res.status(400).json({ message: 'No tries left' });
     }
 
@@ -23,57 +40,32 @@ const authController = async (req, res) => {
 
     try {
         const existingUser = await User.findOne({ email });
-        if (existingUser) {
-            
-            deleteTempUser(email);
-            const token = generateToken({ email });
-
-            res.cookie('token', token, {
-                httpOnly: true,
-                maxAge: 30 * 24 * 60 * 60 * 1000,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
-                path: '/'
-            });
-
-            res.cookie('userStatus', 'loggedIn', {
-                path: '/',
-                sameSite: 'strict',
-                maxAge: 30 * 24 * 60 * 60 * 1000, // 30 ngày
-            });
-
-            return res.status(201).json({ message: 'Login suscessful' });
-        }
-
-        const currentDateTime = moment();
-        const formattedDateTimeString = currentDateTime.format('YYYY-MM-DD HH:mm');
-        const lastSeenMessage = formatLastSeenMessage(formattedDateTimeString)
-
-        const newUser = new User({ email, lastSeen: formattedDateTimeString, lastSeenMessage: lastSeenMessage });
-        await newUser.save();
-
-        deleteTempUser(email);
 
         const token = generateToken({ email });
+        deleteTempUser(email);
 
-        res.cookie('token', token, {
-            httpOnly: true,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            path: '/'
+        if (existingUser) {
+            setAuthCookies(res, token);
+            return res.status(200).json({ message: 'Login successful' });
+        }
+
+        const currentDateTime = moment().format('YYYY-MM-DD HH:mm');
+        const lastSeenMessage = formatLastSeenMessage(currentDateTime);
+
+        const newUser = new User({
+            email,
+            lastSeen: currentDateTime,
+            lastSeenMessage,
         });
 
-        res.cookie('userStatus', 'loggedIn', {
-            path: '/',
-            sameSite: 'strict',
-            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 ngày
-        });
+        await newUser.save();
 
-        res.status(201).json({ message: 'User created successfully' });
+        setAuthCookies(res, token);
+        return res.status(201).json({ message: 'User created successfully' });
+
     } catch (error) {
-        console.error('Error creating user:', error.message);
-        res.status(500).json({ message: 'Server error' });
+        console.error('Error during authentication:', error.message);
+        return res.status(500).json({ message: 'Server error' });
     }
 };
 
