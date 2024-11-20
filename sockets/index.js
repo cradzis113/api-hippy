@@ -33,7 +33,7 @@ const setupSocket = (server) => {
 
         const user = await User.findOne({ userName });
         if (!user) return;
-        
+
         const currentDateTime = moment();
         const formattedDateTimeString = currentDateTime.format('YYYY-MM-DD HH:mm');
 
@@ -301,14 +301,14 @@ const setupSocket = (server) => {
           const lastMessageFromRecipient = processUserMessages(Object.fromEntries(recipientUser.messageHistory), senderUserName, recipientUserName);
 
           if (visibilityOption === 'onlyYou') {
-            socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName, senderUserName });
+            socket.emit('notification', { message: lastMessageFromSender.message, originMessage: lastMessageFromSender, recipientUserName, senderUserName, listMessage: updatedSenderMessageHistory });
           } else {
             socket.emit('notification', { message: lastMessageFromSender.message, recipientUserName, senderUserName });
             socket.to(chatStates[senderUserName].recipientSocketId).emit('notification', { message: lastMessageFromRecipient.message, senderUserName });
           }
 
           socket.emit('messageSent', updatedSenderMessageHistory);
-          if (chatStates[senderUserName].recipientSocketId) {
+          if (chatStates[senderUserName]?.recipientSocketId) {
             socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
           }
         };
