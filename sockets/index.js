@@ -369,6 +369,69 @@ const setupSocket = (server) => {
       }
     });
 
+    socket.on('pinMessage', async (data, type) => {
+      const { senderUserName, recipientUserName, message, time } = data;
+
+      try {
+        const senderUser = await User.findOne({ userName: senderUserName });
+        const recipientUser = await User.findOne({ userName: recipientUserName });
+
+        if (!senderUser || !recipientUser) {
+          console.log("User not found");
+          return;
+        }
+
+        if (type === 'pin') {
+          if (!senderUser.pinnedInfo) {
+            senderUser.pinnedInfo = { [recipientUserName]: [{ message, time, recipientUserName, senderUserName }] };
+          } else {
+            senderUser.pinnedInfo[recipientUserName].push({ message, time, recipientUserName, senderUserName });
+          }
+
+          if (!recipientUser.pinnedInfo) {
+            recipientUser.pinnedInfo = { [senderUserName]: [{ message, time, senderUserName, recipientUserName }] };
+          } else {
+            recipientUser.pinnedInfo[senderUserName].push({ message, time, senderUserName, recipientUserName });
+          }
+        }
+
+        if (type === 'unpin') {
+          if (senderUser.pinnedInfo?.[recipientUserName]) {
+            const updatedSenderPinnedMessages = senderUser.pinnedInfo[recipientUserName].filter(
+              (msg) => msg.message !== message
+            );
+            senderUser.pinnedInfo[recipientUserName] = updatedSenderPinnedMessages;
+            if (updatedSenderPinnedMessages.length === 0) {
+              delete senderUser.pinnedInfo[recipientUserName];
+            }
+          }
+
+          if (recipientUser.pinnedInfo?.[senderUserName]) {
+            const updatedRecipientPinnedMessages = recipientUser.pinnedInfo[senderUserName].filter(
+              (msg) => msg.message !== message
+            );
+            recipientUser.pinnedInfo[senderUserName] = updatedRecipientPinnedMessages;
+            if (updatedRecipientPinnedMessages.length === 0) {
+              delete recipientUser.pinnedInfo[senderUserName];
+            }
+          }
+        }
+
+        senderUser.markModified('pinnedInfo');
+        recipientUser.markModified('pinnedInfo');
+
+        const updatedSenderUser = await senderUser.save();
+        const updatedRecipientUser = await recipientUser.save();
+
+        socket.emit('carouselDataUpdate', updatedSenderUser?.pinnedInfo[recipientUserName] || []);
+        if (chatStates[senderUserName].recipientSocketId) {
+          socket.to(chatStates[senderUserName].recipientSocketId).emit('carouselDataUpdate', updatedRecipientUser?.pinnedInfo[senderUserName] || []);
+        }
+      } catch (error) {
+        console.error("Error in pinning/unpinning message:", error);
+      }
+    });
+
     socket.on('connectionUpdate', async (connectionData) => {
       const { userName, socketId } = connectionData;
 

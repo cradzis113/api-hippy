@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
-    id: String, 
+    id: String,
     time: String,
     seen: Boolean,
     revoked: Object,
@@ -13,9 +13,10 @@ const messageSchema = new mongoose.Schema({
 
 const userSchema = new mongoose.Schema({
     status: String,
-    lastSeen: String,
-    lastSeenMessage: String,
     socketId: String,
+    lastSeen: String,
+    pinnedInfo: Object,
+    lastSeenMessage: String,
     email: {
         type: String,
         required: true,
