@@ -1,6 +1,6 @@
+const moment = require('moment');
 const { Server } = require('socket.io');
 const User = require('../models/userModel');
-const moment = require('moment');
 const { formatLastSeenMessage } = require('../utils/timeUtils');
 
 let chatStates = {}
@@ -381,41 +381,32 @@ const setupSocket = (server) => {
           return;
         }
 
-        if (type === 'pin') {
-          if (!senderUser.pinnedInfo) {
-            senderUser.pinnedInfo = { [recipientUserName]: [{ message, time, recipientUserName, senderUserName }] };
+        const insertMessageFindIndex = (messages, newMessage) => {
+          const newTime = moment(newMessage.time);
+          const index = messages.findIndex((msg) => moment(msg.time).isAfter(newTime));
+          if (index === -1) {
+            messages.push(newMessage);
           } else {
-            senderUser.pinnedInfo[recipientUserName].push({ message, time, recipientUserName, senderUserName });
+            messages.splice(index, 0, newMessage);
           }
+        };
 
-          if (!recipientUser.pinnedInfo) {
-            recipientUser.pinnedInfo = { [senderUserName]: [{ message, time, senderUserName, recipientUserName }] };
-          } else {
-            recipientUser.pinnedInfo[senderUserName].push({ message, time, senderUserName, recipientUserName });
-          }
-        }
-
-        if (type === 'unpin') {
-          if (senderUser.pinnedInfo?.[recipientUserName]) {
-            const updatedSenderPinnedMessages = senderUser.pinnedInfo[recipientUserName].filter(
-              (msg) => msg.message !== message
-            );
-            senderUser.pinnedInfo[recipientUserName] = updatedSenderPinnedMessages;
-            if (updatedSenderPinnedMessages.length === 0) {
-              delete senderUser.pinnedInfo[recipientUserName];
+        const updatePinnedInfo = (user, key, action) => {
+          if (action === 'pin') {
+            if (!user.pinnedInfo) user.pinnedInfo = {};
+            if (!user.pinnedInfo[key]) user.pinnedInfo[key] = [];
+            const newMessage = { message, time, senderUserName, recipientUserName };
+            insertMessageFindIndex(user.pinnedInfo[key], newMessage); // Chèn theo thứ tự thời gian
+          } else if (action === 'unpin') {
+            if (user.pinnedInfo?.[key]) {
+              user.pinnedInfo[key] = user.pinnedInfo[key].filter((msg) => msg.message !== message);
+              if (user.pinnedInfo[key].length === 0) delete user.pinnedInfo[key];
             }
           }
+        };
 
-          if (recipientUser.pinnedInfo?.[senderUserName]) {
-            const updatedRecipientPinnedMessages = recipientUser.pinnedInfo[senderUserName].filter(
-              (msg) => msg.message !== message
-            );
-            recipientUser.pinnedInfo[senderUserName] = updatedRecipientPinnedMessages;
-            if (updatedRecipientPinnedMessages.length === 0) {
-              delete recipientUser.pinnedInfo[senderUserName];
-            }
-          }
-        }
+        updatePinnedInfo(senderUser, recipientUserName, type);
+        updatePinnedInfo(recipientUser, senderUserName, type);
 
         senderUser.markModified('pinnedInfo');
         recipientUser.markModified('pinnedInfo');
@@ -424,13 +415,19 @@ const setupSocket = (server) => {
         const updatedRecipientUser = await recipientUser.save();
 
         socket.emit('carouselDataUpdate', updatedSenderUser?.pinnedInfo[recipientUserName] || []);
-        if (chatStates[senderUserName].recipientSocketId) {
-          socket.to(chatStates[senderUserName].recipientSocketId).emit('carouselDataUpdate', updatedRecipientUser?.pinnedInfo[senderUserName] || []);
+
+        const recipientSocketId = chatStates[recipientUserName]?.recipientSocketId;
+        if (recipientSocketId) {
+          socket.to(recipientSocketId).emit(
+            'carouselDataUpdate',
+            updatedRecipientUser?.pinnedInfo[senderUserName] || []
+          );
         }
       } catch (error) {
         console.error("Error in pinning/unpinning message:", error);
       }
     });
+
 
     socket.on('connectionUpdate', async (connectionData) => {
       const { userName, socketId } = connectionData;

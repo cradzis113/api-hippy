@@ -7,7 +7,7 @@ const moment = require('moment');
 const setAuthCookies = (res, token) => {
     const cookieOptions = {
         httpOnly: true,
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: 30 * 24 * 60 * 60 * 1000, 
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
         path: '/',
