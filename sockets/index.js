@@ -214,24 +214,34 @@ const setupSocket = (server) => {
         visibilityOption,
         recipientUserName,
         currentUserMessages,
+        currentUserRevokedMessages
       } = data;
-      // return console.log(data)
+      
       try {
         let senderUser, recipientUser;
-
-        if (!messageData) {
+        if (!messageData && !currentUserMessages && !currentUserRevokedMessages && !otherUsers) {
           [senderUser, recipientUser] = await Promise.all([
             User.findOne({ userName: senderUserName }),
             User.findOne({ userName: recipientUserName }),
           ]);
         }
 
-        if (otherUsers || currentUserMessages) {
+        if (otherUsers) {
           for (const message of otherUsers.messages) {
             recipientUser = await User.findOne({ userName: message.recipientUserName });
             senderUser = await User.findOne({ userName: message.senderUserName });
           }
+        }
+
+        if (currentUserMessages) {
           for (const message of currentUserMessages.messages) {
+            recipientUser = await User.findOne({ userName: message.recipientUserName });
+            senderUser = await User.findOne({ userName: message.senderUserName });
+          }
+        }
+
+        if (currentUserRevokedMessages) {
+          for (const message of currentUserRevokedMessages.messages) {
             recipientUser = await User.findOne({ userName: message.recipientUserName });
             senderUser = await User.findOne({ userName: message.senderUserName });
           }
@@ -239,17 +249,42 @@ const setupSocket = (server) => {
 
         if (messageData) {
           for (const message of messageData) {
-            [senderUser, recipientUser] = await Promise.all([
-              User.findOne({ userName: message.senderUserName }),
-              User.findOne({ userName: message.recipientUserName }),
-            ]);
+            recipientUser = await User.findOne({ userName: message.recipientUserName });
+            senderUser = await User.findOne({ userName: message.senderUserName });
           }
         }
 
         const updateMessageRevokedStatus = (messages) => {
+          if (!messages) return;
           messages.forEach((message) => {
-            if (otherUsers && currentUserMessages) {
+            if (otherUsers) {
               otherUsers.messages.forEach((msg) => {
+                if (msg.id === message.id) {
+                  if (!message.revoked) {
+                    message.revoked = { revokedBy: [currentUser] };
+                  } else {
+                    message.revoked.revokedBy = message.revoked.revokedBy || [];
+                    message.revoked.revokedBy.push(currentUser);
+                  }
+                }
+              })
+            }
+
+            if (currentUserMessages) {
+              currentUserMessages.messages.forEach((msg) => {
+                if (msg.id === message.id) {
+                  if (!message.revoked) {
+                    message.revoked = { revokedBy: [currentUser] };
+                  } else {
+                    message.revoked.revokedBy = message.revoked.revokedBy || [];
+                    message.revoked.revokedBy.push(currentUser);
+                  }
+                }
+              })
+            }
+
+            if (currentUserRevokedMessages) {
+              currentUserRevokedMessages.messages.forEach((msg) => {
                 if (msg.id === message.id) {
                   if (!message.revoked) {
                     message.revoked = { revokedBy: [currentUser] };
@@ -364,11 +399,9 @@ const setupSocket = (server) => {
               lastMessageFromSender = processUserMessages(Object.fromEntries(senderUser.messageHistory), message.recipientUserName, currentUser);
               lastMessageFromRecipient = processUserMessages(Object.fromEntries(recipientUser.messageHistory), message.senderUserName, message.recipientUserName);
             });
-          } else if (!messageData && !currentUserMessages && !otherUsers) {
-            updatedSenderMessageHistory = senderUser.messageHistory.get(recipientUserName);
-            lastMessageFromSender = processUserMessages(Object.fromEntries(senderUser.messageHistory), recipientUserName, currentUser);
-            lastMessageFromRecipient = processUserMessages(Object.fromEntries(recipientUser.messageHistory), senderUserName, recipientUserName);
-          } else {
+          }
+
+          if (messageData) {
             messageData.forEach((message) => {
               updatedSenderMessageHistory = senderUser.messageHistory.get(message.recipientUserName);
               lastMessageFromSender = processUserMessages(Object.fromEntries(senderUser.messageHistory), message.recipientUserName, currentUser);
@@ -376,8 +409,35 @@ const setupSocket = (server) => {
             });
           }
 
-          if (visibilityOption === 'onlyYou') {
-            socket.emit('notification', { message: lastMessageFromSender.message, originMessage: lastMessageFromSender, recipientUserName, senderUserName, listMessage: updatedSenderMessageHistory });
+          if (
+            !messageData &&
+            !currentUserMessages &&
+            !otherUsers &&
+            !currentUserRevokedMessages
+          ) {
+            updatedSenderMessageHistory = senderUser.messageHistory.get(recipientUserName);
+            lastMessageFromSender = processUserMessages(Object.fromEntries(senderUser.messageHistory), recipientUserName, currentUser);
+            lastMessageFromRecipient = processUserMessages(Object.fromEntries(recipientUser.messageHistory), senderUserName, recipientUserName);
+          }
+
+          if (currentUserRevokedMessages) {
+            currentUserRevokedMessages.messages.forEach(message => {
+              updatedSenderMessageHistory = senderUser.messageHistory.get(message.recipientUserName);
+              lastMessageFromSender = processUserMessages(Object.fromEntries(senderUser.messageHistory), message.recipientUserName, currentUser);
+              lastMessageFromRecipient = processUserMessages(Object.fromEntries(recipientUser.messageHistory), message.senderUserName, message.recipientUserName);
+            })
+          }
+
+          if (visibilityOption === 'onlyYou' || currentUserRevokedMessages?.visibilityOption === 'onlyYou' || otherUsers?.visibilityOption === 'onlyYou') {
+            if (currentUserRevokedMessages) {
+              currentUserRevokedMessages.messages.forEach(message => {
+                socket.emit('notification', { message: lastMessageFromSender.message, originMessage: lastMessageFromSender, messageRecipientUserName: message.recipientUserName, messageSenderUserName: message.senderUserName, listMessage: updatedSenderMessageHistory });
+              })
+            }
+
+            if (!currentUserRevokedMessages && !otherUsers) {
+              socket.emit('notification', { message: lastMessageFromSender.message, originMessage: lastMessageFromSender, recipientUserName, senderUserName, listMessage: updatedSenderMessageHistory });
+            }
           } else {
             if (currentUserMessages) {
               currentUserMessages.messages.forEach(message => {
@@ -433,6 +493,8 @@ const setupSocket = (server) => {
 
         if (messageData && data.visibilityOption === 'onlyYou') {
           for (const message of messageData) {
+            console.log(senderUser.messageHistory, message.recipientUserName)
+            console.log(recipientUser.messageHistory, message.senderUserName)
             updateMessageRevokedStatus(senderUser.messageHistory.get(message.recipientUserName), message.recipientUserName);
             updateMessageRevokedStatus(recipientUser.messageHistory.get(message.senderUserName), message.senderUserName);
           }
@@ -440,18 +502,29 @@ const setupSocket = (server) => {
           return;
         }
 
-        if (otherUsers && (!currentUserMessages || !messageData)) {
-          if (otherUsers.visibilityOption === 'onlyYou') {
-            otherUsers.messages.forEach((message) => {
-              updateMessageRevokedStatus(senderUser.messageHistory.get(message.senderUserName), message.senderUserName);
-              updateMessageRevokedStatus(recipientUser.messageHistory.get(message.recipientUserName), message.recipientUserName);
-            });
-            try {
-              await saveAndEmitUpdates();
-            } catch (error) {
-              console.error('Error in saveAndEmitUpdates:', error);
-            }
-          }
+        if (currentUserRevokedMessages && currentUserRevokedMessages.visibilityOption === 'onlyYou') {
+          currentUserRevokedMessages.messages.forEach((message) => {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(message.recipientUserName), message.recipientUserName);
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(message.senderUserName), message.senderUserName);
+          });
+          await saveAndEmitUpdates();
+        }
+
+        if (otherUsers && otherUsers.visibilityOption === 'onlyYou') {
+          otherUsers.messages.forEach((message) => {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(message.senderUserName), message.senderUserName);
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(message.recipientUserName), message.recipientUserName);
+          });
+          await saveAndEmitUpdates();
+        }
+
+        if (currentUserMessages && currentUserMessages.visibilityOption === 'onlyYou') {
+          currentUserMessages.messages.forEach((message) => {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(message.senderUserName), message.senderUserName);
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(message.recipientUserName), message.recipientUserName);
+          });
+          await saveAndEmitUpdates();
+          return;
         }
 
         let senderMessageHistory, recipientMessageHistory;
