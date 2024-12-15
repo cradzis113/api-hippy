@@ -18,9 +18,14 @@ const setupSocket = (server) => {
     socket.on('search', async (query, callback) => {
       try {
         const regex = new RegExp(query, 'i');
-        const users = await User.find({ userName: { $regex: regex } });
-
-        callback(null, users);
+        const user = await User.findOne({ userName: { $regex: regex } });
+        const messageKeys = Array.from(user.messageHistory.keys());
+        const latestMessages = new Map(messageKeys.map(key => [key, user.messageHistory.get(key).slice(-10)]));
+        const userWithLatestMessages = { 
+          ...user.toObject(), 
+          messageHistory: Object.fromEntries(latestMessages)
+        };
+        callback(null, userWithLatestMessages);
       } catch (error) {
         console.error('Error during search:', error);
         callback(error.message, null);
@@ -129,7 +134,7 @@ const setupSocket = (server) => {
 
         const refreshedSender = await User.findOne({ userName: senderUserName });
         socket.emit('messageHistoryUpdate', refreshedSender.messageHistory);
-        socket.emit('messageSent', senderConversationHistory);
+        socket.emit('messageSent', messageData);
       } catch (error) {
         console.error('Error updating user messages:', error);
       }
