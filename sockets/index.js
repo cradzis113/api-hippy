@@ -148,7 +148,7 @@ const setupSocket = (server) => {
 
     socket.on('updateBackState', (data) => {
       const { backState, userName } = data;
-      if (!backState || !userName) {
+      if (!backState || userName) {
         return;
       }
 
@@ -160,6 +160,27 @@ const setupSocket = (server) => {
         chatStates[userName].backState = backState;
       }
     });
+
+    socket.on('o', async (userName) => {
+      try {
+
+        const o = await User.findOne({ userName });
+        const n = Object.keys(Object.fromEntries(o.messageHistory))
+        const result = n.reduce((acc, i) => {
+          const j = o.messageHistory.get(i) || []; // Lấy dữ liệu từ messageHistory
+          const h = j.findIndex(k => k.seen); // Tìm chỉ số của phần tử đầu tiên có `seen`
+          const p = j.slice(h + 1); // Lấy các phần tử sau chỉ số `h`
+          
+          acc[i] = p; // Gán vào đối tượng kết quả với key là `i` và value là `p`
+          return acc;
+        }, {});
+        
+      socket.emit('n', result)        
+
+      } catch (error) {
+
+      }
+    })
 
     socket.on('chatEvent', async (eventData) => {
       const { type, userName, socketId, recipientUserName, recipientSocketId } = eventData;
