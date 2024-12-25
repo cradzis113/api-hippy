@@ -8,6 +8,7 @@ const messageSchema = new mongoose.Schema({
     message: String,
     replyInfo: Object,
     senderUserName: String,
+    seenTemporarily: Boolean,
     recipientUserName: String,
 });
 

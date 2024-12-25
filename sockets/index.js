@@ -66,6 +66,7 @@ const setupSocket = (server) => {
 
     socket.on('privateChat', async (messageData) => {
       const { recipientUserName, senderUserName } = messageData;
+      let isChatting = false
 
       try {
         const senderUser = await User.findOne({ userName: senderUserName });
@@ -91,8 +92,29 @@ const setupSocket = (server) => {
           recipientUser.messageHistory.set(senderUserName, []);
         }
 
-        senderUser.messageHistory.get(recipientUserName).push(messageData);
-        recipientUser.messageHistory.get(senderUserName).push(messageData);
+        const hasBeenSeenBySender = senderUser.messageHistory.get(recipientUserName).some(i => i.seen);
+        const hasBeenSeenByRecipient = recipientUser.messageHistory.get(senderUserName).some(i => i.seen);
+        const hasBeenTemporarilySeenBySender = recipientUser.messageHistory.get(senderUserName).some(i => i.seenTemporarily);
+        const hasBeenTemporarilySeenByRecipient = senderUser.messageHistory.get(recipientUserName).some(i => i.seenTemporarily);
+        const isMessageFromSender = recipientUser.messageHistory.get(senderUserName).some(i => i.senderUserName === senderUserName);
+
+        if (!hasBeenSeenBySender && !hasBeenTemporarilySeenBySender) {
+          const temporaryMessage = { ...messageData, seenTemporarily: true };
+          senderUser.messageHistory.get(recipientUserName).push(temporaryMessage);
+        } else {
+          senderUser.messageHistory.get(recipientUserName).push(messageData);
+        }
+
+        if (!hasBeenSeenByRecipient && !hasBeenTemporarilySeenByRecipient) {
+          const temporaryMessage = { ...messageData, seenTemporarily: true };
+          recipientUser.messageHistory.get(senderUserName).push(temporaryMessage);
+        } else {
+          recipientUser.messageHistory.get(senderUserName).push(messageData);
+        }
+
+        if (!chatStates[senderUserName].returnMessage) {
+          chatStates[recipientUserName].returnMessage = true
+        }
 
         const updatedRecipientUser = await recipientUser.save();
         const updatedSenderUser = await senderUser.save();
@@ -112,21 +134,25 @@ const setupSocket = (server) => {
             } else {
               msg.seen = undefined;
             }
+
+            // socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', messageData, senderUserName);
           });
 
           await updatedRecipientUser.save();
           await updatedSenderUser.save();
 
           socket.emit('readMessages', messageData, recipientUserName);
-          socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', messageData, senderUserName);
+          socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', { ...messageData, seen: true }, senderUserName);
           socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
+          isChatting = true
         }
 
         if (chatStates[recipientUserName]) {
-          if (chatStates[recipientUserName].backState) {
-            socket.to(chatStates[recipientUserName].socketId).emit('messageBackState', messageData, senderUserName)
-          } else {
+          if (!isChatting) {
             socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', messageData, senderUserName);
+          }
+          if (!isMessageFromSender) {
+            socket.to(chatStates[recipientUserName].socketId).emit('k', recipientUser)
           }
         }
 
@@ -146,41 +172,41 @@ const setupSocket = (server) => {
       }
     })
 
-    socket.on('updateBackState', (data) => {
-      const { backState, userName } = data;
-      if (!backState || userName) {
+    socket.on('fetchUnseenMessages', async (userName) => {
+      if (!chatStates[userName].returnMessage) { // lỗi
         return;
       }
 
-      if (!chatStates[userName]) {
-        chatStates[userName] = {};
-      }
+      try {
+        const user = await User.findOne({ userName });
+        const messageRooms = Object.keys(Object.fromEntries(user.messageHistory));
 
-      if (!chatStates[userName].backState) {
-        chatStates[userName].backState = backState;
+        const unseenMessages = messageRooms.reduce((accumulator, room) => {
+          const messages = user.messageHistory.get(room) || [];
+          const firstSeenIndex = messages.findIndex(message => message.seen);
+          const firstTemporarilySeenIndex = messages.findIndex(message => message.seenTemporarily);
+
+          if (firstSeenIndex === -1) {
+            if (messages.length === 1) {
+              accumulator[room] = messages;
+              return accumulator
+            }
+
+            const newMessages = messages.slice(firstTemporarilySeenIndex + 1);
+            accumulator[room] = newMessages;
+            return accumulator;
+          }
+
+          const newMessages = messages.slice(firstSeenIndex + 1);
+          accumulator[room] = newMessages;
+          return accumulator;
+        }, {});
+
+        socket.emit('unseenMessages', unseenMessages);
+      } catch (error) {
+        console.error('Error processing unseen messages:', error);
       }
     });
-
-    socket.on('o', async (userName) => {
-      try {
-
-        const o = await User.findOne({ userName });
-        const n = Object.keys(Object.fromEntries(o.messageHistory))
-        const result = n.reduce((acc, i) => {
-          const j = o.messageHistory.get(i) || []; // Lấy dữ liệu từ messageHistory
-          const h = j.findIndex(k => k.seen); // Tìm chỉ số của phần tử đầu tiên có `seen`
-          const p = j.slice(h + 1); // Lấy các phần tử sau chỉ số `h`
-          
-          acc[i] = p; // Gán vào đối tượng kết quả với key là `i` và value là `p`
-          return acc;
-        }, {});
-        
-      socket.emit('n', result)        
-
-      } catch (error) {
-
-      }
-    })
 
     socket.on('chatEvent', async (eventData) => {
       const { type, userName, socketId, recipientUserName, recipientSocketId } = eventData;
@@ -747,10 +773,15 @@ const setupSocket = (server) => {
       }
     });
 
-    socket.on('disconnect', () => {
-      chatStates = Object.fromEntries(
-        Object.entries(chatStates).filter(([key, value]) => value.socketId !== socket.id)
-      );
+    socket.on('disconnect', async () => {
+      try {
+        chatStates = Object.fromEntries(
+          Object.entries(chatStates).filter(([key, value]) => value.socketId !== socket.id)
+        );
+      } catch (error) {
+
+      }
+
     });
 
   });
