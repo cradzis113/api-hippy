@@ -152,7 +152,7 @@ const setupSocket = (server) => {
             socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', messageData, senderUserName);
           }
           if (!isMessageFromSender) {
-            socket.to(chatStates[recipientUserName].socketId).emit('k', recipientUser)
+            socket.to(chatStates[recipientUserName].socketId).emit('recipientUserUpdate', recipientUser)
           }
         }
 
@@ -764,22 +764,13 @@ const setupSocket = (server) => {
       );
     });
 
-    socket.on('getUserData', async (userName) => { // xem xét để bỏ
-      try {
-        const userData = await User.findOne({ userName });
-        socket.emit('receiveUserData', userData);
-      } catch (error) {
-        console.error('Error fetching user data:', error);
-      }
-    });
-
     socket.on('disconnect', async () => {
       try {
         chatStates = Object.fromEntries(
           Object.entries(chatStates).filter(([key, value]) => value.socketId !== socket.id)
         );
       } catch (error) {
-
+        console.error("Error processing disconnect event:", error);
       }
 
     });
