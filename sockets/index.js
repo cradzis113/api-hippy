@@ -112,7 +112,7 @@ const setupSocket = (server) => {
           recipientUser.messageHistory.get(senderUserName).push(messageData);
         }
 
-        if (!chatStates[senderUserName].returnMessage) {
+        if (!chatStates[recipientUserName].returnMessage) {
           chatStates[recipientUserName].returnMessage = true
         }
 
@@ -141,7 +141,7 @@ const setupSocket = (server) => {
           await updatedRecipientUser.save();
           await updatedSenderUser.save();
 
-          socket.emit('readMessages', messageData, recipientUserName);
+          socket.emit('readMessages', { ...messageData, seen: true }, recipientUserName);
           socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', { ...messageData, seen: true }, senderUserName);
           socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
           isChatting = true
@@ -151,12 +151,16 @@ const setupSocket = (server) => {
           if (!isChatting) {
             socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', messageData, senderUserName);
           }
+
           if (!isMessageFromSender) {
             socket.to(chatStates[recipientUserName].socketId).emit('recipientUserUpdate', recipientUser)
           }
         }
 
-        socket.emit('messageHistoryUpdate', messageData, recipientUserName);
+        if (!isChatting) {
+          socket.emit('messageHistoryUpdate', messageData, recipientUserName);
+        }
+
         socket.emit('messageSent', messageData);
       } catch (error) {
         console.error('Error updating user messages:', error);
@@ -263,6 +267,7 @@ const setupSocket = (server) => {
           if (chatStates[recipientUserName]) {
             chatStates[recipientUserName].recipientSocketId = socketId;
           }
+
           chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
         } catch (error) {
           console.error(error);
