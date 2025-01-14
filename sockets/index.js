@@ -112,9 +112,12 @@ const setupSocket = (server) => {
           recipientUser.messageHistory.get(senderUserName).push(messageData);
         }
 
-        if (!chatStates[recipientUserName].returnMessage) {
+        console.log(senderUserName, recipientUserName)
+        console.log(chatStates)
+        if (!chatStates[senderUserName].returnMessage) {
           chatStates[recipientUserName].returnMessage = true
         }
+
 
         const updatedRecipientUser = await recipientUser.save();
         const updatedSenderUser = await senderUser.save();
@@ -261,6 +264,7 @@ const setupSocket = (server) => {
 
           const senderLatestMessage = senderUser.messageHistory.get(recipientUserName).slice(-1)[0]
           const recipientLatestMessage = recipientUser.messageHistory.get(userName).slice(-1)[0]
+
           socket.emit('readMessages', senderLatestMessage, recipientUserName);
           socket.to(recipientSocketId).emit('readMessages', recipientLatestMessage, userName);
 
