@@ -112,12 +112,9 @@ const setupSocket = (server) => {
           recipientUser.messageHistory.get(senderUserName).push(messageData);
         }
 
-        console.log(senderUserName, recipientUserName)
-        console.log(chatStates)
-        if (!chatStates[senderUserName].returnMessage) {
+        if (chatStates[recipientUserName] && !chatStates[recipientUserName].returnMessage) {
           chatStates[recipientUserName].returnMessage = true
         }
-
 
         const updatedRecipientUser = await recipientUser.save();
         const updatedSenderUser = await senderUser.save();
