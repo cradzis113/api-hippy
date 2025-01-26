@@ -2,7 +2,7 @@ const moment = require('moment');
 const { Server } = require('socket.io');
 const User = require('../models/userModel');
 const { formatLastSeenMessage } = require('../utils/timeUtils');
-
+const _ = require('lodash');
 let chatStates = {}
 
 const setupSocket = (server) => {
@@ -216,12 +216,42 @@ const setupSocket = (server) => {
       const { type, userName, socketId, recipientUserName, recipientSocketId } = eventData;
       if (!userName || !socketId) return;
 
-      if (type === 'register') {
-        chatStates[userName] = { socketId };
-      } else if (type === 'chatRequest') {
-        if (!recipientUserName || !recipientSocketId) return;
+      try {
+        if (type === 'register') {
+          const currentUser = await User.findOne({ userName })
+          const userContacts = currentUser?.messageHistory ? _.keys(Object.fromEntries(currentUser.messageHistory)) : [];
+          chatStates[userName] = { socketId, userOnline: userContacts };
 
-        try {
+          const onlineUsersWithCurrentUser = _.map(chatStates, (state) => {
+            if (_.includes(state.userOnline, userName)) {
+              if (!userName) return
+              return {
+                socketId: state.socketId,
+                userOnline: _.intersection(state.userOnline, [userName]),
+              };
+            }
+          }).filter(Boolean);
+
+          const connectedUserStates = _.map([chatStates[onlineUsersWithCurrentUser[0]?.userOnline[0]]], (state) => {
+            return {
+              socketId: state?.socketId,
+              userOnline: _.intersection(state?.userOnline, _.keys(chatStates)),
+            };
+          });
+
+          const combinedOnlineStates = []
+          if (connectedUserStates[0].socketId) {
+            combinedOnlineStates.push(..._.flatMap([connectedUserStates, onlineUsersWithCurrentUser]))
+          }
+
+          if (_.size(combinedOnlineStates) > 0) {
+            combinedOnlineStates.forEach(i => {
+              io.to(i.socketId).emit('addMessagesToQueue', i.userOnline)
+            })
+          }
+        } else if (type === 'chatRequest') {
+          if (!recipientUserName || !recipientSocketId) return;
+
           const senderUser = await User.findOne({ userName });
           const recipientUser = await User.findOne({ userName: recipientUserName });
 
@@ -270,9 +300,10 @@ const setupSocket = (server) => {
           }
 
           chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
-        } catch (error) {
-          console.error(error);
+
         }
+      } catch (error) {
+        console.error(error);
       }
     });
 
@@ -771,14 +802,28 @@ const setupSocket = (server) => {
     });
 
     socket.on('disconnect', async () => {
+      const disconnectedUserId = _.findKey(chatStates, userState => userState.socketId === socket.id);
+    
       try {
         chatStates = Object.fromEntries(
-          Object.entries(chatStates).filter(([key, value]) => value.socketId !== socket.id)
+          Object.entries(chatStates).filter(([userId, userState]) => userState.socketId !== socket.id)
         );
+    
+        const affectedUsers = _.compact(_.map(chatStates, (userState, userId) => {
+          if (_.includes(userState.userOnline, disconnectedUserId)) {
+            return {
+              socketId: userState.socketId,
+              userOffline: disconnectedUserId,
+            };
+          }
+        }));
+    
+        affectedUsers.forEach(affectedUser => {
+          io.to(affectedUser.socketId).emit('removeMessageFromQueue', affectedUser.userOffline);
+        });
       } catch (error) {
         console.error("Error processing disconnect event:", error);
       }
-
     });
 
   });
