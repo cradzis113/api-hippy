@@ -34,7 +34,6 @@ const setupSocket = (server) => {
     socket.on('updateUserStatus', async (data) => {
       try {
         const { userName, status, hasFocus } = data;
-
         const user = await User.findOne({ userName });
         if (!user) return;
 
@@ -45,24 +44,37 @@ const setupSocket = (server) => {
         const lastSeenMessage = hasFocus ? formatLastSeenMessage(formattedDateTimeString) : undefined;
 
         const updateFields = {
-          status: status,
           ...(lastSeen && { lastSeen }),
           ...(lastSeenMessage && { lastSeenMessage })
         };
 
-        const updatedUser = await User.findOneAndUpdate(
+        await User.findOneAndUpdate(
           { userName: userName },
           { $set: updateFields },
           { new: true, upsert: true }
         );
 
-        const userStatusUpdate = (({ status, userName, lastSeenMessage }) => ({ status, userName, lastSeenMessage }))(updatedUser);
-        socket.emit('userStatusUpdated', userStatusUpdate);
-
+        if (chatStates[userName]) {
+          chatStates[userName].status = status
+          const u = _.find(chatStates, { TextingWith: userName })
+          if (u) {
+            socket.to(u.socketId).emit('userStatus', { userName, status });
+          }
+        }
       } catch (error) {
         console.error('Error updating user status:', error);
       }
     });
+
+    socket.on('enterChat', (data) => {
+      const { userName, currentUserName } = data
+      if (!userName || !currentUserName || !chatStates[userName]) return
+
+      chatStates[currentUserName].TextingWith = userName
+      setTimeout(() => {
+        socket.emit('userStatus', { userName, status: chatStates[userName]?.status });
+      }, 28);
+    })
 
     socket.on('privateChat', async (messageData) => {
       const { recipientUserName, senderUserName } = messageData;
@@ -160,7 +172,6 @@ const setupSocket = (server) => {
         if (!isChatting) {
           socket.emit('messageHistoryUpdate', messageData, recipientUserName);
         }
-
         socket.emit('messageSent', messageData);
       } catch (error) {
         console.error('Error updating user messages:', error);
@@ -220,7 +231,7 @@ const setupSocket = (server) => {
         if (type === 'register') {
           const currentUser = await User.findOne({ userName })
           const userContacts = currentUser?.messageHistory ? _.keys(Object.fromEntries(currentUser.messageHistory)) : [];
-          chatStates[userName] = { socketId, userOnline: userContacts };
+          chatStates[userName] = { socketId, userOnline: userContacts, status: 'online' };
 
           const onlineUsersWithCurrentUser = _.map(chatStates, (state) => {
             if (_.includes(state.userOnline, userName)) {
@@ -262,7 +273,12 @@ const setupSocket = (server) => {
             if (chatStates[recipientUserName]) {
               chatStates[recipientUserName].recipientSocketId = socketId;
             }
-            chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
+            chatStates[userName] = {
+              ...chatStates[userName],
+              recipientUserName,
+              recipientSocketId,
+              socketId
+            };
             return;
           }
 
@@ -299,8 +315,12 @@ const setupSocket = (server) => {
             chatStates[recipientUserName].recipientSocketId = socketId;
           }
 
-          chatStates[userName] = { recipientUserName, recipientSocketId, socketId };
-
+          chatStates[userName] = {
+            ...chatStates[userName],
+            recipientUserName,
+            recipientSocketId,
+            socketId
+          };
         }
       } catch (error) {
         console.error(error);
@@ -360,7 +380,6 @@ const setupSocket = (server) => {
 
         const updateMessageRevokedStatus = (messages) => {
           if (!messages) return;
-
           const revokeMessage = (message) => {
             if (!message.revoked) {
               message.revoked = { revokedBy: [currentUser] };
@@ -524,9 +543,33 @@ const setupSocket = (server) => {
                 }
               }
 
-              socket.emit('messageSent', updatedSenderMessageHistory);
+              let foundMessage;
+
+              const messageSources = [];
+
+              if (currentUserMessages) {
+                messageSources.push(currentUserMessages.messages);
+              }
+              if (currentUserRevokedMessages) {
+                messageSources.push(currentUserRevokedMessages.messages);
+              }
+              if (otherUsers) {
+                messageSources.push(otherUsers.messages);
+              }
+              if (messageData) {
+                messageSources.push(messageData);
+              }
+
+              if (messageSources.length > 0) {
+                const intersections = messageSources.map(source =>
+                  _.intersectionBy(updatedSenderMessageHistory, source, 'id')
+                );
+                foundMessage = _.flatten(intersections);
+              }
+
+              socket.emit('messageSent', foundMessage);
               if (chatStates[senderName]?.recipientSocketId) {
-                socket.to(chatStates[senderName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
+                socket.to(chatStates[senderName].recipientSocketId).emit('messageSent', foundMessage);
               }
             });
           };
@@ -553,13 +596,18 @@ const setupSocket = (server) => {
               senderUserName: senderName
             });
 
-            socket.to(chatStates[senderName].recipientSocketId).emit('notification', {
-              message: lastMessageFromRecipient.message,
-              senderUserName: senderName
-            });
+            if (chatStates[senderName]?.recipientSocketId) {
+              socket.to(chatStates[senderName].recipientSocketId).emit('notification', {
+                message: lastMessageFromRecipient.message,
+                senderUserName: senderName
+              });
+            }
 
-            socket.emit('messageSent', updatedSenderMessageHistory);
-            socket.to(chatStates[senderName].recipientSocketId).emit('messageSent', updatedSenderMessageHistory);
+            const foundMessage = _.find(updatedSenderMessageHistory, { id: id })
+            socket.emit('messageSent', foundMessage);
+            if (chatStates[senderName]?.recipientSocketId) {
+              socket.to(chatStates[senderName].recipientSocketId).emit('messageSent', foundMessage);
+            }
           }
 
           if (currentUserRevokedMessages) {
@@ -572,7 +620,7 @@ const setupSocket = (server) => {
         };
 
 
-        if (visibilityOption === 'onlyYou') {
+        if (visibilityOption === 'onlyYou' && !messageData && !currentUserMessages) {
           if (currentUser === senderUserName) {
             updateMessageRevokedStatus(senderUser.messageHistory.get(recipientUserName));
             updateMessageRevokedStatus(recipientUser.messageHistory.get(senderUserName));
@@ -602,8 +650,8 @@ const setupSocket = (server) => {
           }
         }
 
-        if (messageData && data.visibilityOption === 'onlyYou') {
-          for (const message of messageData) {
+        if (currentUserMessages && currentUserMessages.visibilityOption === 'onlyYou') {
+          for (const message of currentUserMessages.messages) {
             updateMessageRevokedStatus(senderUser.messageHistory.get(message.recipientUserName));
             updateMessageRevokedStatus(recipientUser.messageHistory.get(message.senderUserName));
           }
@@ -633,13 +681,12 @@ const setupSocket = (server) => {
           await saveAndEmitUpdates();
         }
 
-        if (currentUserMessages && currentUserMessages.visibilityOption === 'onlyYou') {
-          currentUserMessages.messages.forEach((message) => {
-            updateMessageRevokedStatus(senderUser.messageHistory.get(message.senderUserName));
-            updateMessageRevokedStatus(recipientUser.messageHistory.get(message.recipientUserName));
+        if (messageData && visibilityOption === 'onlyYou') {
+          messageData.forEach((message) => {
+            updateMessageRevokedStatus(senderUser.messageHistory.get(message.recipientUserName));
+            updateMessageRevokedStatus(recipientUser.messageHistory.get(message.senderUserName));
           });
           await saveAndEmitUpdates();
-          return;
         }
 
         let senderMessageHistory, recipientMessageHistory;
@@ -730,7 +777,7 @@ const setupSocket = (server) => {
     });
 
     socket.on('pinMessage', async (data, type) => {
-      const { senderUserName, recipientUserName, message, time, id } = data;
+      const { senderUserName, recipientUserName, message, time, id, currentChatUser } = data;
 
       try {
         const senderUser = await User.findOne({ userName: senderUserName });
@@ -776,7 +823,7 @@ const setupSocket = (server) => {
 
         socket.emit('carouselDataUpdate', updatedSenderUser?.pinnedInfo[recipientUserName] || []);
 
-        const recipientSocketId = chatStates[recipientUserName]?.recipientSocketId;
+        const recipientSocketId = chatStates[currentChatUser]?.socketId;
         if (recipientSocketId) {
           socket.to(recipientSocketId).emit(
             'carouselDataUpdate',
@@ -803,12 +850,12 @@ const setupSocket = (server) => {
 
     socket.on('disconnect', async () => {
       const disconnectedUserId = _.findKey(chatStates, userState => userState.socketId === socket.id);
-    
+
       try {
         chatStates = Object.fromEntries(
           Object.entries(chatStates).filter(([userId, userState]) => userState.socketId !== socket.id)
         );
-    
+
         const affectedUsers = _.compact(_.map(chatStates, (userState, userId) => {
           if (_.includes(userState.userOnline, disconnectedUserId)) {
             return {
@@ -817,7 +864,7 @@ const setupSocket = (server) => {
             };
           }
         }));
-    
+
         affectedUsers.forEach(affectedUser => {
           io.to(affectedUser.socketId).emit('removeMessageFromQueue', affectedUser.userOffline);
         });

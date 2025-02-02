@@ -27,6 +27,6 @@ setupSocket(server);
 
 connectDB();
 
-server.listen(3001, () => {
+server.listen(3001, '192.168.1.7', () => {
   console.log('Listening on port 3001');
 });

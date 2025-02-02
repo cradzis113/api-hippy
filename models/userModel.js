@@ -13,7 +13,6 @@ const messageSchema = new mongoose.Schema({
 });
 
 const userSchema = new mongoose.Schema({
-    status: String,
     socketId: String,
     lastSeen: String,
     pinnedInfo: Object,
