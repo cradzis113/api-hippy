@@ -3,22 +3,7 @@ const { generateToken } = require('../utils/tokenUtils');
 const { formatLastSeenMessage } = require('../utils/timeUtils');
 const User = require('../models/userModel');
 const moment = require('moment');
-
-const setAuthCookies = (res, token) => {
-    const cookieOptions = {
-        httpOnly: true,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-    };
-
-    res.cookie('token', token, cookieOptions);
-    res.cookie('userStatus', 'loggedIn', {
-        ...cookieOptions,
-        httpOnly: false,
-    });
-};
+const { v4: uuidv4 } = require('uuid');
 
 const authController = async (req, res) => {
     const { email, code } = req.body;
@@ -40,13 +25,21 @@ const authController = async (req, res) => {
 
     try {
         const existingUser = await User.findOne({ email });
-        
         const token = generateToken({ email });
+        const refreshToken = uuidv4();
         deleteTempUser(email);
 
         if (existingUser) {
-            setAuthCookies(res, token);
-            return res.status(200).json({ message: 'Login successful', user: existingUser });
+            res.cookie('refreshToken', refreshToken, {
+                httpOnly: true,
+                maxAge: 3 * 24 * 60 * 60 * 1000,
+                secure: true,
+                sameSite: 'none',
+                path: '/',
+            });
+
+            await User.findOneAndUpdate({ email }, { refreshToken }, { new: true })
+            return res.status(200).json({ message: 'Login successful', token });
         }
 
         const currentDateTime = moment().format('YYYY-MM-DD HH:mm');
@@ -56,13 +49,20 @@ const authController = async (req, res) => {
             email,
             lastSeen: currentDateTime,
             lastSeenMessage,
+            refreshToken,
         });
 
         await newUser.save();
 
-        setAuthCookies(res, token);
-        return res.status(201).json({ message: 'User created successfully' });
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            maxAge: 3 * 24 * 60 * 60 * 1000,
+            secure: true,
+            sameSite: 'none',
+            path: '/',
+        });
 
+        return res.status(201).json({ token });
     } catch (error) {
         console.error('Error during authentication:', error.message);
         return res.status(500).json({ message: 'Server error' });

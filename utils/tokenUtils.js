@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 
 const generateToken = (payload) => {
     const secretKey = process.env.JWT_SECRET || 'cradz';
-    const options = { expiresIn: '30d' }; // Token hết hạn sau 30 ngày (khoảng 1 tháng)
+    const options = { expiresIn: '1m' }; 
     return jwt.sign(payload, secretKey, options);
 };
 

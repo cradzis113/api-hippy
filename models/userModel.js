@@ -30,6 +30,7 @@ const userSchema = new mongoose.Schema({
         unique: true,
         sparse: true,
     },
+    refreshToken: String,
     messageHistory: {
         type: Map,
         of: [messageSchema],

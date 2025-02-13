@@ -8,7 +8,7 @@ let chatStates = {}
 const setupSocket = (server) => {
   const io = new Server(server, {
     cors: {
-      origin: process.env.ALLOW_ORIGIN,
+      origin: ['http://192.168.1.7:5173', 'http://localhost:5173', 'https://itself-graphs-delays-rica.trycloudflare.com'],
       methods: ['GET', 'POST'],
     },
   });
@@ -837,6 +837,7 @@ const setupSocket = (server) => {
 
     socket.on('connectionUpdate', async (connectionData) => {
       const { userName, socketId } = connectionData;
+      if (!userName) return;
 
       if (!chatStates[userName]) {
         chatStates[userName] = {}

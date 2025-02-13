@@ -1,11 +1,13 @@
 const express = require('express');
 const router = express.Router();
 
-const authRouter = require('./auth');
-const getCodeRouter = require('./getCode');
-const getUserDataRouter = require('./getUserData');
-const cookieRouter = require('./cookie')
+const authRouter = require('./authRoutes');
+const codeRouter = require('./codeRoutes');
+const userRouter = require('./userRoutes');
+const cookieRouter = require('./cookieRoutes');
+const refreshRouter = require('./refreshRouter');
+    
+router.use('/api', [authRouter, codeRouter, userRouter, cookieRouter, refreshRouter]);
 
-router.use('/api', [authRouter, getCodeRouter, getUserDataRouter, cookieRouter]);
 
 module.exports = router;

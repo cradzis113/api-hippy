@@ -28,7 +28,7 @@ const createTempUser = async (email) => {
             console.log(`Deleted info for ${email} after timeout.`);
         }, tempData[email].timeoutDuration);
 
-        return { message: 'We have sent you a message in Telegram', code: code };
+        return { message: 'We have sent you a message in your email', code: code };
     } else {
         console.log(`Code already generated for ${email}.`);
         return { message: 'Code already generated for this email' };

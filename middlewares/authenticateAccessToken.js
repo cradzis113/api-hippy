@@ -1,7 +1,7 @@
 const { verifyToken } = require('../utils/tokenUtils');
 
-const authenticateToken = async (req, res, next) => {
-    const token = req.cookies.token;
+const authenticateAccessToken = async (req, res, next) => {
+    const token = req.body.token;
 
     if (!token) {
         return res.status(401).json({ message: 'Token is required' });
@@ -12,8 +12,8 @@ const authenticateToken = async (req, res, next) => {
         req.user = decoded;
         next();
     } catch (error) {
-        res.status(403).json({ message: 'Invalid or expired token' });
+        res.status(200).json({ status: 'error', message: 'Invalid or expired token' });
     }
 };
 
-module.exports = authenticateToken;
+module.exports = authenticateAccessToken;

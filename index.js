@@ -13,7 +13,20 @@ const setupSocket = require('./sockets/index');
 const app = express();
 
 app.use(cors({
-  origin: process.env.ALLOW_ORIGIN,
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'http://192.168.1.7:5173',
+      'http://192.168.1.241:5173',
+      'http://localhost:5173',
+      'https://itself-graphs-delays-rica.trycloudflare.com'
+    ];
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    callback(new Error('Not allowed by CORS'), false);
+  },
   methods: ['GET', 'POST'],
   credentials: true,
 }));
@@ -27,6 +40,6 @@ setupSocket(server);
 
 connectDB();
 
-server.listen(3001, '192.168.1.7', () => {
+server.listen(3001, () => {
   console.log('Listening on port 3001');
 });
