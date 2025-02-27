@@ -10,6 +10,7 @@ const messageSchema = new mongoose.Schema({
     senderUserName: String,
     seenTemporarily: Boolean,
     recipientUserName: String,
+    reactions: Object,
 });
 
 const userSchema = new mongoose.Schema({

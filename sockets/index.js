@@ -130,8 +130,25 @@ const setupSocket = (server) => {
 
         const updatedRecipientUser = await recipientUser.save();
         const updatedSenderUser = await senderUser.save();
-
-        if (chatStates[recipientUserName] && chatStates[recipientUserName].recipientUserName === senderUserName) {
+        // console.log(chatStates[recipientUserName].seen, chatStates[senderUserName].seen)
+        // console.log(_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName, senderUserName)
+        // console.log(chatStates[recipientUserName].seen)
+        // console.log(chatStates[recipientUserName])
+        // console.log(chatStates, recipientUserName, senderUserName, 1, !chatStates[senderUserName].seen, 2, _.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName, 3, !chatStates[recipientUserName].seen, 4)
+        // console.log((
+        //   (!chatStates[recipientUserName].seen && !chatStates[senderUserName].seen) ||
+        //   ((_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName) &&
+        //     !chatStates[recipientUserName].seen)
+        // ))
+        if (
+          (
+            (!chatStates[recipientUserName].seen && !chatStates[senderUserName].seen) ||
+            ((_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName) &&
+              !chatStates[recipientUserName].seen)
+          ) &&
+          chatStates[recipientUserName] &&
+          chatStates[recipientUserName].recipientUserName === senderUserName
+        ) {
           updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
             if (msgIndex === updatedSenderUser.messageHistory.get(recipientUserName).length - 1) {
               msg.seen = true;
@@ -146,7 +163,6 @@ const setupSocket = (server) => {
             } else {
               msg.seen = undefined;
             }
-
             // socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', messageData, senderUserName);
           });
 
@@ -231,7 +247,7 @@ const setupSocket = (server) => {
         if (type === 'register') {
           const currentUser = await User.findOne({ userName })
           const userContacts = currentUser?.messageHistory ? _.keys(Object.fromEntries(currentUser.messageHistory)) : [];
-          chatStates[userName] = { socketId, userOnline: userContacts, status: 'online' };
+          chatStates[userName] = { socketId, userOnline: userContacts, status: 'online', seen: false };
 
           const onlineUsersWithCurrentUser = _.map(chatStates, (state) => {
             if (_.includes(state.userOnline, userName)) {
@@ -832,6 +848,133 @@ const setupSocket = (server) => {
         }
       } catch (error) {
         console.error("Error in pinning/unpinning message:", error);
+      }
+    });
+
+    socket.on('reaction', async (data) => {
+      const { messageId, emoji, currentChatUser, currentUser, type } = data;
+
+      try {
+        if (type === 'add') {
+          const senderUser = await User.findOne({ userName: currentUser });
+          const recipientUser = await User.findOne({ userName: currentChatUser });
+          if (!senderUser || !recipientUser) return;
+
+          const senderMessageIndex = senderUser.messageHistory.get(currentChatUser).findIndex((msg) => msg.id === messageId);
+          const recipientMessageIndex = recipientUser.messageHistory.get(currentUser).findIndex((msg) => msg.id === messageId);
+
+          if (senderMessageIndex !== -1 && recipientMessageIndex !== -1) {
+            const senderMessage = senderUser.messageHistory.get(currentChatUser)[senderMessageIndex];
+            const recipientMessage = recipientUser.messageHistory.get(currentUser)[recipientMessageIndex];
+
+            if (!senderMessage.reactions) {
+              senderMessage.reactions = {};
+            }
+            if (!recipientMessage.reactions) {
+              recipientMessage.reactions = {};
+            }
+
+            senderMessage.reactions = {
+              ...senderMessage.reactions,
+              [currentUser]: emoji
+            };
+
+            recipientMessage.reactions = {
+              ...recipientMessage.reactions,
+              [currentUser]: emoji
+            };
+
+            senderUser.markModified('messageHistory');
+            recipientUser.markModified('messageHistory');
+            await Promise.all([senderUser.save(), recipientUser.save()]);
+
+            socket.emit('reactionUpdate', data)
+            if (chatStates[currentChatUser]) {
+              socket.to(chatStates[currentChatUser].socketId).emit('reactionUpdate', data) // can't use recipientSocketId because the user is not online
+            }
+          }
+        } else if (type === 'remove') {
+          const senderUser = await User.findOne({ userName: currentUser });
+          const recipientUser = await User.findOne({ userName: currentChatUser });
+
+          if (!senderUser || !recipientUser) return;
+
+          const senderMessageIndex = senderUser.messageHistory.get(currentChatUser).findIndex((msg) => msg.id === messageId);
+          const recipientMessageIndex = recipientUser.messageHistory.get(currentUser).findIndex((msg) => msg.id === messageId);
+
+          if (senderMessageIndex !== -1 && recipientMessageIndex !== -1) {
+            const senderMessage = senderUser.messageHistory.get(currentChatUser)[senderMessageIndex];
+            const recipientMessage = recipientUser.messageHistory.get(currentUser)[recipientMessageIndex];
+
+            if (senderMessage.reactions) {
+              delete senderMessage.reactions[currentUser];
+            }
+            if (recipientMessage.reactions) {
+              delete recipientMessage.reactions[currentUser];
+            }
+
+            senderUser.markModified('messageHistory');
+            recipientUser.markModified('messageHistory');
+            await Promise.all([senderUser.save(), recipientUser.save()]);
+
+            socket.emit('reactionUpdate', data)
+            if (chatStates[currentChatUser]) {
+              socket.to(chatStates[currentChatUser].socketId).emit('reactionUpdate', data) // can't use recipientSocketId because the user is not online
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error handling reaction:', error);
+      }
+    });
+
+    socket.on('updateSeenStatus', async (data) => {  
+    // còn trường hợp nếu mà b đang ko seen mà a gửi b thì 
+    // bên b đánh dấu 1 tin nhắn chưa đọc và a cũng kéo lên chưa seen
+    //  và b gửi lại thì nó gửi lại cái unseen của b qua a là thành 2 c
+    // ái và cái này là sai phải là 1 cái
+      const { seen, currentUser, currentChatUser } = data;
+      if (!currentUser || seen === undefined || !currentChatUser) return;
+      chatStates[currentUser].seen = seen;
+
+      try {
+        const [senderUser, recipientUser] = await Promise.all([
+          User.findOne({ userName: currentUser }),
+          User.findOne({ userName: currentChatUser })
+        ]);
+        if (!senderUser || !recipientUser) return;
+
+        const senderMessages = senderUser.messageHistory.get(currentChatUser);
+        const recipientMessages = recipientUser.messageHistory.get(currentUser);
+        const senderSeenIndex = _.findIndex(senderMessages, 'seen');
+        const recipientSeenIndex = _.findIndex(recipientMessages, 'seen');
+
+        // console.log(data)
+        // console.log(senderSeenIndex, senderMessages.length, recipientSeenIndex, recipientMessages.length)
+        if (senderSeenIndex !== -1 && recipientSeenIndex !== -1 &&
+          senderSeenIndex < senderMessages.length - 1 &&
+          recipientSeenIndex < recipientMessages.length - 1 &&
+          _.last(senderMessages).senderUserName !== currentUser
+        ) {
+          senderMessages[senderSeenIndex] = _.omit(senderMessages[senderSeenIndex], ['seen']);
+          recipientMessages[recipientSeenIndex] = _.omit(recipientMessages[recipientSeenIndex], ['seen']);
+
+          _.last(senderMessages).seen = true;
+          _.last(recipientMessages).seen = true;
+
+          senderUser.markModified('messageHistory');
+          recipientUser.markModified('messageHistory');
+
+          socket.emit('updateSeenStatus', { indexSeen: senderSeenIndex, user: currentChatUser });
+          if (chatStates[currentChatUser]?.socketId) {
+            socket.to(chatStates[currentChatUser].socketId).emit('updateSeenStatus', { indexSeen: recipientSeenIndex, user: currentUser });
+          }
+
+          await Promise.all([senderUser.save(), recipientUser.save()]);
+        }
+
+      } catch (error) {
+        console.error("Error updating seen status:", error);
       }
     });
 
