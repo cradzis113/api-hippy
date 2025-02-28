@@ -70,7 +70,7 @@ const setupSocket = (server) => {
       const { userName, currentUserName } = data
       if (!userName || !currentUserName || !chatStates[userName]) return
 
-      chatStates[currentUserName].TextingWith = userName
+      chatStates[currentUserName].TextingWith = userName //  Cannot set properties of undefined (setting 'TextingWith')
       setTimeout(() => {
         socket.emit('userStatus', { userName, status: chatStates[userName]?.status });
       }, 28);
@@ -128,27 +128,22 @@ const setupSocket = (server) => {
           chatStates[recipientUserName].returnMessage = true
         }
 
+        const senderMessages = senderUser.messageHistory.get(recipientUserName);
+        const recipientMessages = recipientUser.messageHistory.get(senderUserName);
+        const senderSeenIndex = _.findIndex(senderMessages, 'seen');
+        const recipientSeenIndex = _.findIndex(recipientMessages, 'seen');
+
         const updatedRecipientUser = await recipientUser.save();
         const updatedSenderUser = await senderUser.save();
-        // console.log(chatStates[recipientUserName].seen, chatStates[senderUserName].seen)
-        // console.log(_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName, senderUserName)
-        // console.log(chatStates[recipientUserName].seen)
-        // console.log(chatStates[recipientUserName])
-        // console.log(chatStates, recipientUserName, senderUserName, 1, !chatStates[senderUserName].seen, 2, _.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName, 3, !chatStates[recipientUserName].seen, 4)
-        // console.log((
-        //   (!chatStates[recipientUserName].seen && !chatStates[senderUserName].seen) ||
-        //   ((_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName) &&
-        //     !chatStates[recipientUserName].seen)
-        // ))
+
         if (
           (
             (!chatStates[recipientUserName].seen && !chatStates[senderUserName].seen) ||
-            ((_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName) &&
-              !chatStates[recipientUserName].seen)
-          ) &&
-          chatStates[recipientUserName] &&
-          chatStates[recipientUserName].recipientUserName === senderUserName
-        ) {
+            (
+              (_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName) &&
+              !chatStates[recipientUserName].seen
+            )
+          ) && chatStates[recipientUserName] && chatStates[recipientUserName].recipientUserName === senderUserName) {
           updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
             if (msgIndex === updatedSenderUser.messageHistory.get(recipientUserName).length - 1) {
               msg.seen = true;
@@ -163,7 +158,6 @@ const setupSocket = (server) => {
             } else {
               msg.seen = undefined;
             }
-            // socket.to(chatStates[recipientUserName].socketId).emit('messageHistoryUpdate', messageData, senderUserName);
           });
 
           await updatedRecipientUser.save();
@@ -174,6 +168,41 @@ const setupSocket = (server) => {
           socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
           isChatting = true
         }
+
+        setTimeout(async () => {
+          console.log(chatStates[recipientUserName].seen, chatStates[senderUserName].seen, senderSeenIndex, recipientSeenIndex, senderMessages.length, recipientMessages.length, senderMessages.length - 1 - senderSeenIndex, recipientMessages.length - 1 - recipientSeenIndex)
+          if ((chatStates[recipientUserName].seen &&
+            !chatStates[senderUserName].seen &&
+            (senderMessages.length - 1) - senderSeenIndex >= 2 &&
+            (recipientMessages.length - 1) - recipientSeenIndex >= 2)) {
+            updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
+              if (msgIndex === updatedSenderUser.messageHistory.get(recipientUserName).length - 2) {
+                msg.seen = true;
+              } else {
+                msg.seen = undefined;
+              }
+            });
+            
+            updatedRecipientUser.messageHistory.get(senderUserName).forEach((msg, msgIndex) => {
+              if (msgIndex === updatedRecipientUser.messageHistory.get(senderUserName).length - 2) {
+                msg.seen = true;
+              } else {
+                msg.seen = undefined;
+              }
+            });
+
+            const c = await updatedRecipientUser.save();
+            const cc = await updatedSenderUser.save();
+
+            const index = _.findIndex(cc.messageHistory.get(recipientUserName), 'seen')
+            const index2 = _.findIndex(c.messageHistory.get(senderUserName), 'seen')
+            console.log(index, index2)
+            socket.emit('readMessages', { ...messageData, seen: true }, recipientUserName);
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', messageData, senderUserName, index);
+            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
+            isChatting = true
+          }
+        }, 3000)
 
         if (chatStates[recipientUserName]) {
           if (!isChatting) {
@@ -928,13 +957,10 @@ const setupSocket = (server) => {
       }
     });
 
-    socket.on('updateSeenStatus', async (data) => {  
-    // còn trường hợp nếu mà b đang ko seen mà a gửi b thì 
-    // bên b đánh dấu 1 tin nhắn chưa đọc và a cũng kéo lên chưa seen
-    //  và b gửi lại thì nó gửi lại cái unseen của b qua a là thành 2 c
-    // ái và cái này là sai phải là 1 cái
+    socket.on('updateSeenStatus', async (data) => {
       const { seen, currentUser, currentChatUser } = data;
       if (!currentUser || seen === undefined || !currentChatUser) return;
+      // console.log(data)
       chatStates[currentUser].seen = seen;
 
       try {
