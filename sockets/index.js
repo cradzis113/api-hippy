@@ -73,11 +73,11 @@ const setupSocket = (server) => {
       chatStates[currentUserName].TextingWith = userName //  Cannot set properties of undefined (setting 'TextingWith')
       setTimeout(() => {
         socket.emit('userStatus', { userName, status: chatStates[userName]?.status });
-      }, 28);
+      }, 35);
     })
 
     socket.on('privateChat', async (messageData) => {
-      const { recipientUserName, senderUserName } = messageData;
+      const { recipientUserName, senderUserName, hasEmittedSeen } = messageData;
       let isChatting = false
 
       try {
@@ -138,10 +138,10 @@ const setupSocket = (server) => {
 
         if (
           (
-            (!chatStates[recipientUserName].seen && !chatStates[senderUserName].seen) ||
+            (!chatStates[recipientUserName]?.seen && !chatStates[senderUserName]?.seen) ||
             (
               (_.last(updatedSenderUser.messageHistory.get(recipientUserName)).senderUserName === senderUserName) &&
-              !chatStates[recipientUserName].seen
+              !chatStates[recipientUserName]?.seen
             )
           ) && chatStates[recipientUserName] && chatStates[recipientUserName].recipientUserName === senderUserName) {
           updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
@@ -151,7 +151,6 @@ const setupSocket = (server) => {
               msg.seen = undefined;
             }
           });
-
           updatedRecipientUser.messageHistory.get(senderUserName).forEach((msg, msgIndex) => {
             if (msgIndex === updatedRecipientUser.messageHistory.get(senderUserName).length - 1) {
               msg.seen = true;
@@ -167,42 +166,66 @@ const setupSocket = (server) => {
           socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', { ...messageData, seen: true }, senderUserName);
           socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
           isChatting = true
+        } else if ((chatStates[recipientUserName]?.seen &&
+          !hasEmittedSeen &&
+          (senderMessages.length - 1) - senderSeenIndex === 2 &&
+          (recipientMessages.length - 1) - recipientSeenIndex === 2)
+          && senderMessages[senderMessages.length - 1].senderUserName !== senderUserName ||
+          senderMessages[senderMessages.length - 2].senderUserName !== senderUserName
+        ) {
+          updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
+            if (msgIndex === updatedSenderUser.messageHistory.get(recipientUserName).length - 2) {
+              msg.seen = true;
+            } else {
+              msg.seen = undefined;
+            }
+          });
+          updatedRecipientUser.messageHistory.get(senderUserName).forEach((msg, msgIndex) => {
+            if (msgIndex === updatedRecipientUser.messageHistory.get(senderUserName).length - 2) {
+              msg.seen = true;
+            } else {
+              msg.seen = undefined;
+            }
+          });
+
+          const savedRecipientUser = await updatedRecipientUser.save();
+          const savedSenderUser = await updatedSenderUser.save();
+
+          const senderSeenMessageIndex = _.findIndex(savedSenderUser.messageHistory.get(recipientUserName), 'seen')
+          const recipientSeenMessageIndex = _.findIndex(savedRecipientUser.messageHistory.get(senderUserName), 'seen')
+          socket.emit('readMessages', messageData, recipientUserName, senderSeenMessageIndex);
+          socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', messageData, senderUserName, recipientSeenMessageIndex);
+          socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
+          isChatting = true
+        } else if ((chatStates[recipientUserName]?.seen &&
+          !chatStates[senderUserName]?.seen &&
+          (senderMessages.length - 1) - senderSeenIndex === 2 &&
+          (recipientMessages.length - 1) - recipientSeenIndex === 2)) {
+          updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
+            if (msgIndex === senderSeenIndex) {
+              msg.seen = true;
+            } else {
+              msg.seen = undefined;
+            }
+          });
+          updatedRecipientUser.messageHistory.get(senderUserName).forEach((msg, msgIndex) => {
+            if (msgIndex === recipientSeenIndex) {
+              msg.seen = true;
+            } else {
+              msg.seen = undefined;
+            }
+          });
+
+          const savedRecipientUser = await updatedRecipientUser.save();
+          const savedSenderUser = await updatedSenderUser.save();
+
+          const senderSeenMessageIndex = _.findIndex(savedSenderUser.messageHistory.get(recipientUserName), 'seen')
+          const recipientSeenMessageIndex = _.findIndex(savedRecipientUser.messageHistory.get(senderUserName), 'seen')
+          socket.emit('readMessages', messageData, recipientUserName, senderSeenMessageIndex);
+          socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', messageData, senderUserName, recipientSeenMessageIndex);
+          socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
+          isChatting = true
         }
-
-        setTimeout(async () => {
-          console.log(chatStates[recipientUserName].seen, chatStates[senderUserName].seen, senderSeenIndex, recipientSeenIndex, senderMessages.length, recipientMessages.length, senderMessages.length - 1 - senderSeenIndex, recipientMessages.length - 1 - recipientSeenIndex)
-          if ((chatStates[recipientUserName].seen &&
-            !chatStates[senderUserName].seen &&
-            (senderMessages.length - 1) - senderSeenIndex >= 2 &&
-            (recipientMessages.length - 1) - recipientSeenIndex >= 2)) {
-            updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
-              if (msgIndex === updatedSenderUser.messageHistory.get(recipientUserName).length - 2) {
-                msg.seen = true;
-              } else {
-                msg.seen = undefined;
-              }
-            });
-            
-            updatedRecipientUser.messageHistory.get(senderUserName).forEach((msg, msgIndex) => {
-              if (msgIndex === updatedRecipientUser.messageHistory.get(senderUserName).length - 2) {
-                msg.seen = true;
-              } else {
-                msg.seen = undefined;
-              }
-            });
-
-            const c = await updatedRecipientUser.save();
-            const cc = await updatedSenderUser.save();
-
-            const index = _.findIndex(cc.messageHistory.get(recipientUserName), 'seen')
-            const index2 = _.findIndex(c.messageHistory.get(senderUserName), 'seen')
-            console.log(index, index2)
-            socket.emit('readMessages', { ...messageData, seen: true }, recipientUserName);
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('readMessages', messageData, senderUserName, index);
-            socket.to(chatStates[senderUserName].recipientSocketId).emit('messageSent', messageData);
-            isChatting = true
-          }
-        }, 3000)
 
         if (chatStates[recipientUserName]) {
           if (!isChatting) {
@@ -426,6 +449,28 @@ const setupSocket = (server) => {
         const updateMessageRevokedStatus = (messages) => {
           if (!messages) return;
           const revokeMessage = (message) => {
+
+            const currentRecipientUserName = message.recipientUserName;
+
+            if (_.size(senderUser.pinnedInfo) > 0) {
+              const senderIndex = _.findIndex(senderUser.pinnedInfo[currentRecipientUserName], { id: message.id });
+              if (senderIndex !== -1) {
+                if (!senderUser.pinnedInfo[currentRecipientUserName][senderIndex].revoked) {
+                  senderUser.pinnedInfo[currentRecipientUserName][senderIndex].revoked = {
+                    revokedBy: [currentUser]
+                  };
+                  senderUser.markModified('pinnedInfo');
+                } else {
+                  const revokedBy = senderUser.pinnedInfo[currentRecipientUserName][senderIndex].revoked.revokedBy || [];
+                  if (!revokedBy.includes(currentUser)) {
+                    revokedBy.push(currentUser);
+                    senderUser.pinnedInfo[currentRecipientUserName][senderIndex].revoked.revokedBy = revokedBy;
+                    senderUser.markModified('pinnedInfo');
+                  }
+                }
+              }
+            }
+
             if (!message.revoked) {
               message.revoked = { revokedBy: [currentUser] };
             } else {
@@ -865,14 +910,13 @@ const setupSocket = (server) => {
 
         const updatedSenderUser = await senderUser.save();
         const updatedRecipientUser = await recipientUser.save();
-
-        socket.emit('carouselDataUpdate', updatedSenderUser?.pinnedInfo[recipientUserName] || []);
+        socket.emit('carouselDataUpdate', { id, time, message, senderUserName, recipientUserName, type });
 
         const recipientSocketId = chatStates[currentChatUser]?.socketId;
         if (recipientSocketId) {
           socket.to(recipientSocketId).emit(
             'carouselDataUpdate',
-            updatedRecipientUser?.pinnedInfo[senderUserName] || []
+            { id, time, message, senderUserName, recipientUserName, type }
           );
         }
       } catch (error) {
@@ -960,7 +1004,6 @@ const setupSocket = (server) => {
     socket.on('updateSeenStatus', async (data) => {
       const { seen, currentUser, currentChatUser } = data;
       if (!currentUser || seen === undefined || !currentChatUser) return;
-      // console.log(data)
       chatStates[currentUser].seen = seen;
 
       try {
@@ -970,13 +1013,22 @@ const setupSocket = (server) => {
         ]);
         if (!senderUser || !recipientUser) return;
 
+        if (!senderUser.messageHistory || !recipientUser.messageHistory) {
+          console.log("Message history not initialized for one or both users");
+          return;
+        }
+
         const senderMessages = senderUser.messageHistory.get(currentChatUser);
         const recipientMessages = recipientUser.messageHistory.get(currentUser);
+
+        if (!senderMessages || !recipientMessages) {
+          console.log("No message history found between users");
+          return;
+        }
+
         const senderSeenIndex = _.findIndex(senderMessages, 'seen');
         const recipientSeenIndex = _.findIndex(recipientMessages, 'seen');
 
-        // console.log(data)
-        // console.log(senderSeenIndex, senderMessages.length, recipientSeenIndex, recipientMessages.length)
         if (senderSeenIndex !== -1 && recipientSeenIndex !== -1 &&
           senderSeenIndex < senderMessages.length - 1 &&
           recipientSeenIndex < recipientMessages.length - 1 &&
