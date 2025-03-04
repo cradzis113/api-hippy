@@ -449,11 +449,13 @@ const setupSocket = (server) => {
         const updateMessageRevokedStatus = (messages) => {
           if (!messages) return;
           const revokeMessage = (message) => {
-
             const currentRecipientUserName = message.recipientUserName;
+            const currentSenderUserName = message.senderUserName;
 
-            if (_.size(senderUser.pinnedInfo) > 0) {
+            if (_.size(senderUser.pinnedInfo) > 0 && _.size(recipientUser.pinnedInfo  ) > 0) {
               const senderIndex = _.findIndex(senderUser.pinnedInfo[currentRecipientUserName], { id: message.id });
+              const recipientIndex = _.findIndex(recipientUser.pinnedInfo[currentSenderUserName], { id: message.id });
+              console.log(senderIndex, recipientIndex)
               if (senderIndex !== -1) {
                 if (!senderUser.pinnedInfo[currentRecipientUserName][senderIndex].revoked) {
                   senderUser.pinnedInfo[currentRecipientUserName][senderIndex].revoked = {
@@ -466,6 +468,21 @@ const setupSocket = (server) => {
                     revokedBy.push(currentUser);
                     senderUser.pinnedInfo[currentRecipientUserName][senderIndex].revoked.revokedBy = revokedBy;
                     senderUser.markModified('pinnedInfo');
+                  }
+                }
+              }
+              if (recipientIndex !== -1) {
+                if (!recipientUser.pinnedInfo[currentSenderUserName][recipientIndex].revoked) {
+                  recipientUser.pinnedInfo[currentSenderUserName][recipientIndex].revoked = {
+                    revokedBy: [currentUser]
+                  };
+                  recipientUser.markModified('pinnedInfo');
+                } else {
+                  const revokedBy = recipientUser.pinnedInfo[currentSenderUserName][recipientIndex].revoked.revokedBy || [];
+                  if (!revokedBy.includes(currentUser)) {
+                    revokedBy.push(currentUser);
+                    recipientUser.pinnedInfo[currentSenderUserName][recipientIndex].revoked.revokedBy = revokedBy;
+                    recipientUser.markModified('pinnedInfo');
                   }
                 }
               }
