@@ -18,8 +18,8 @@ app.use(cors({
       'http://192.168.1.7:5173',
       'http://192.168.1.241:5173',
       'http://localhost:5173',
-      'https://itself-graphs-delays-rica.trycloudflare.com'
-    ];
+      'https://republican-vermont-mirrors-colony.trycloudflare.com'
+      ];
 
     if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
