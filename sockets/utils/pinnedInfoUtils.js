@@ -1,5 +1,4 @@
-const updatePinnedInfoRevoked = (senderUser, recipientUser, recipientUserName, senderUserName, message, socket, chatStates) => {
-  console.log(senderUser, recipientUser, recipientUserName, senderUserName, message, socket, chatStates)
+const updatePinnedInfoRevoked = (chatStates, senderUser, recipientUser, recipientUserName, senderUserName, message, socket) => {
   const senderPinnedIndex = senderUser.pinnedInfo[recipientUserName].findIndex((msg) => msg.id === message.id);
   const recipientPinnedIndex = recipientUser.pinnedInfo[senderUserName].findIndex((msg) => msg.id === message.id);
   if (senderPinnedIndex !== -1) {
@@ -8,6 +7,7 @@ const updatePinnedInfoRevoked = (senderUser, recipientUser, recipientUserName, s
     } else {
       senderUser.pinnedInfo[recipientUserName][senderPinnedIndex].revoked.revokedBoth = senderUserName;
     }
+    socket.emit('messagePinned', senderPinnedIndex)
   }
   if (recipientPinnedIndex !== -1) {
     if (!recipientUser.pinnedInfo[senderUserName][recipientPinnedIndex].revoked) {
@@ -20,10 +20,8 @@ const updatePinnedInfoRevoked = (senderUser, recipientUser, recipientUserName, s
   senderUser.markModified('pinnedInfo');
   recipientUser.markModified('pinnedInfo');
 
-  socket.emit('pinnedInfoUpdate', senderPinnedIndex)
-  console.log(chatStates[recipientUserName])
   if (chatStates[recipientUserName]) {
-    socket.to(chatStates[recipientUserName].socketId).emit('pinnedInfoUpdate', recipientPinnedIndex)
+    socket.to(chatStates[recipientUserName].socketId).emit('messagePinned', recipientPinnedIndex)
   }
 };
 

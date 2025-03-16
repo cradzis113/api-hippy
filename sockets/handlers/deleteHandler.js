@@ -1,4 +1,6 @@
 const User = require('../../models/userModel');
+const { updatePinnedInfoRevoked } = require('../utils/pinnedInfoUtils');
+const _ = require('lodash');
 
 const deleteHandler = (socket, chatStates) => {
     socket.on('messageDelete', async (data) => {
@@ -61,7 +63,6 @@ const deleteHandler = (socket, chatStates) => {
                     if (_.size(senderUser.pinnedInfo) > 0 && _.size(recipientUser.pinnedInfo) > 0) {
                         const senderPinnedIndex = _.findIndex(senderUser.pinnedInfo[currentRecipientUserName], { id: message.id });
                         const recipientPinnedIndex = _.findIndex(recipientUser.pinnedInfo[currentSenderUserName], { id: message.id });
-                        // console.log(2)
                         if (senderPinnedIndex !== -1) {
                             if (!senderUser.pinnedInfo[currentRecipientUserName][senderPinnedIndex].revoked) {
                                 senderUser.pinnedInfo[currentRecipientUserName][senderPinnedIndex].revoked = {
@@ -93,7 +94,7 @@ const deleteHandler = (socket, chatStates) => {
                             }
                         }
 
-                        socket.emit('pinnedInfoUpdate', senderPinnedIndex)
+                        // socket.emit('messagePinned', senderPinnedIndex) //
                     }
 
                     if (!message.revoked) {
@@ -106,7 +107,6 @@ const deleteHandler = (socket, chatStates) => {
 
                 messages.forEach((message) => {
                     if (otherUsers) {
-                        console.log(1)
                         otherUsers.messages.forEach((msg) => {
                             if (msg.id === message.id) {
                                 revokeMessage(message);
@@ -115,7 +115,6 @@ const deleteHandler = (socket, chatStates) => {
                     }
 
                     if (currentUserMessages && currentUserMessages.visibilityOption === 'onlyYou') {
-                        console.log(2)
                         currentUserMessages.messages.forEach((msg) => {
                             if (msg.id === message.id) {
                                 revokeMessage(message);
@@ -124,7 +123,6 @@ const deleteHandler = (socket, chatStates) => {
                     }
 
                     if (currentUserRevokedMessages) {
-                        console.log(3)
                         currentUserRevokedMessages.messages.forEach((msg) => {
                             if (msg.id === message.id) {
                                 revokeMessage(message);
@@ -136,7 +134,6 @@ const deleteHandler = (socket, chatStates) => {
                     if (messageData) {
                         messageData.forEach((msg) => {
                             if (msg.id === message.id) {
-                                console.log(4)
                                 revokeMessage(message);
                             }
                         });
@@ -144,7 +141,6 @@ const deleteHandler = (socket, chatStates) => {
                     }
 
                     if (message.id === id) {
-                        console.log(5)
                         revokeMessage(message);
                     }
                 });
@@ -439,68 +435,76 @@ const deleteHandler = (socket, chatStates) => {
                 }
 
                 const setRevokedBoth = (message) => {
+                    console.log(message)
                     if (!currentUserMessages || !messageData) {
-                        updatePinnedInfoRevoked(senderUser, recipientUser, message.recipientUserName, message.senderUserName, message, socket);
-
                         if (!message.revoked) {
+                            console.log(1)
                             message.revoked = { revokedBoth: senderUserName };
                         } else {
+                            // console.log(2)
                             message.revoked.revokedBoth = senderUserName;
                         }
+                        updatePinnedInfoRevoked(chatStates, senderUser, recipientUser, message.recipientUserName, message.senderUserName, message, socket);
                     }
 
                     if (messageData) {
                         messageData.forEach((msg) => {
-                            updatePinnedInfoRevoked(senderUser, recipientUser, msg.recipientUserName, msg.senderUserName, msg, socket);
-
                             if (!message.revoked) {
+                                // console.log(3)
                                 message.revoked = { revokedBoth: msg.senderUserName };
                             } else {
+                                // console.log(4)
                                 message.revoked.revokedBoth = msg.senderUserName;
                             }
+                            updatePinnedInfoRevoked(chatStates, senderUser, recipientUser, msg.recipientUserName, msg.senderUserName, msg, socket);
                         })
                     }
 
                     if (currentUserMessages) {
-                        updatePinnedInfoRevoked(senderUser, recipientUser, recipientUserName, senderUserName, message, socket);
                         currentUserMessages.messages.forEach((msg) => {
                             if (!message.revoked) {
+                                // console.log(5)
                                 message.revoked = { revokedBoth: msg.senderUserName };
                             } else {
+                                // console.log(6)
                                 message.revoked.revokedBoth = msg.senderUserName;
                             }
+                            updatePinnedInfoRevoked(chatStates, senderUser, recipientUser, recipientUserName, senderUserName, message, socket);
                         });
                     }
                 };
 
                 if (messageData) {
                     messageData.forEach((message) => {
-                        updatePinnedInfoRevoked(senderUser, recipientUser, message.recipientUserName, message.senderUserName, message, socket);
                         senderMessage = senderMessageHistory.find((msg) => msg.id === message.id);
                         recipientMessage = recipientMessageHistory.find((msg) => msg.id === message.id);
-
                         if (senderMessage && recipientMessage) {
                             setRevokedBoth(senderMessage);
                             setRevokedBoth(recipientMessage);
                         }
                     });
+                    await saveAndEmitUpdates();
                 }
+
+                //
 
                 if (!messageData && !currentUserMessages) {
                     senderMessage = senderMessageHistory.find((msg) => msg.id === id);
                     recipientMessage = recipientMessageHistory.find((msg) => msg.id === id);
+
+                    if (senderMessage && recipientMessage) {
+                        setRevokedBoth(senderMessage);
+                        setRevokedBoth(recipientMessage);
+                        await saveAndEmitUpdates();
+                    }
                 }
 
-                if (senderMessage && recipientMessage) {
-                    setRevokedBoth(senderMessage);
-                    setRevokedBoth(recipientMessage);
-                    await saveAndEmitUpdates();
-                }
+
             }
         } catch (error) {
             console.error('Error occurred while deleting the message:', error);
         }
-    }); //
+    });
 }
 
 module.exports = deleteHandler;

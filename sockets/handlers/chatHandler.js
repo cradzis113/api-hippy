@@ -106,8 +106,8 @@ const chatHandler = (socket, chatStates, io) => {
                 !hasEmittedSeen &&
                 (senderMessages.length - 1) - senderSeenIndex === 2 &&
                 (recipientMessages.length - 1) - recipientSeenIndex === 2)
-                && senderMessages[senderMessages.length - 1].senderUserName !== senderUserName ||
-                senderMessages[senderMessages.length - 2].senderUserName !== senderUserName
+                && senderMessages[senderMessages.length - 1]?.senderUserName !== senderUserName ||
+                senderMessages[senderMessages.length - 2]?.senderUserName !== senderUserName
             ) {
                 updatedSenderUser.messageHistory.get(recipientUserName).forEach((msg, msgIndex) => {
                     if (msgIndex === updatedSenderUser.messageHistory.get(recipientUserName).length - 2) {
