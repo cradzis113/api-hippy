@@ -1,4 +1,7 @@
-const updatePinnedInfoRevoked = (chatStates, senderUser, recipientUser, recipientUserName, senderUserName, message, socket) => {
+const _ = require('lodash');
+
+const updatePinnedInfoRevoked = (senderUser, recipientUser, recipientUserName, senderUserName, message, socket) => {
+  if (_.size(senderUser?.pinnedInfo) === 0 || _.size(recipientUser?.pinnedInfo) === 0) return;
   const senderPinnedIndex = senderUser.pinnedInfo[recipientUserName].findIndex((msg) => msg.id === message.id);
   const recipientPinnedIndex = recipientUser.pinnedInfo[senderUserName].findIndex((msg) => msg.id === message.id);
   if (senderPinnedIndex !== -1) {
@@ -7,7 +10,7 @@ const updatePinnedInfoRevoked = (chatStates, senderUser, recipientUser, recipien
     } else {
       senderUser.pinnedInfo[recipientUserName][senderPinnedIndex].revoked.revokedBoth = senderUserName;
     }
-    socket.emit('messagePinned', senderPinnedIndex)
+
   }
   if (recipientPinnedIndex !== -1) {
     if (!recipientUser.pinnedInfo[senderUserName][recipientPinnedIndex].revoked) {
@@ -19,10 +22,6 @@ const updatePinnedInfoRevoked = (chatStates, senderUser, recipientUser, recipien
 
   senderUser.markModified('pinnedInfo');
   recipientUser.markModified('pinnedInfo');
-
-  if (chatStates[recipientUserName]) {
-    socket.to(chatStates[recipientUserName].socketId).emit('messagePinned', recipientPinnedIndex)
-  }
 };
 
 module.exports = { updatePinnedInfoRevoked }; 

@@ -34,7 +34,7 @@ const connectionHandler = (socket, chatStates, io) => {
       }));
 
       affectedUsers.forEach(affectedUser => {
-        io.to(affectedUser.socketId).emit('userRemoveFromQueue', affectedUser.userOffline);
+        io.to(affectedUser.socketId).emit('removeMessageFromQueue', affectedUser.userOffline);
       });
     } catch (error) {
       console.error("Error processing disconnect event:", error);
